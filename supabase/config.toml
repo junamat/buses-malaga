@@ -1,0 +1,62 @@
+# =============================================================================
+# Supabase CLI — configuración local (Vía A: BACKEND_PROVIDER=supabase-local)
+# -----------------------------------------------------------------------------
+# `supabase start` levanta sobre Docker la MISMA pila que producción:
+# Postgres + PostGIS, Auth (GoTrue), API REST (PostgREST), Studio y las
+# extensiones `pg_cron` / `pg_net`, disponibles en la imagen de Supabase.
+#
+# Objetivo de esta Vía: fidelidad con `supabase-cloud` usando exactamente los
+# mismos adaptadores (repositorio sobre Postgres, scheduler pg_cron, Auth
+# GoTrue). No requiere ningún cambio de código respecto a producción.
+#
+# Migraciones: el repo mantiene su esquema en `db/migrations/` como única
+# fuente de verdad (portable entre los tres modos). En esta Vía se aplican
+# AMBAS migraciones — `0001` (esquema + PostGIS) y `0002` (pg_cron + pg_net) —
+# mediante los scripts `db:apply:supabase-local` / `supabase:reset` de
+# package.json (ver README.dev.md). No se duplican dentro de
+# `supabase/migrations`.
+# =============================================================================
+
+# Identificador del proyecto local (prefijo de los contenedores Docker).
+project_id = "buses-malaga"
+
+[api]
+enabled = true
+# Puerto del API gateway (PostgREST + GoTrue). SUPABASE_URL apunta aquí.
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+# Puerto de Postgres publicado en el host. DATABASE_URL apunta aquí:
+#   postgresql://postgres:postgres@127.0.0.1:54322/postgres
+port = 54322
+shadow_port = 54320
+# Versión mayor de Postgres de la imagen local (incluye PostGIS, pg_cron, pg_net).
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+# Captura de correos salientes en desarrollo (confirmaciones de Auth, etc.).
+[inbucket]
+enabled = true
+port = 54324
+
+[auth]
+# Auth local = GoTrue, idéntico a producción. El adaptador `supabase-auth`
+# (tarea 14.2) verifica contra este GoTrue el JWT de sesión (Requisito 7.6).
+enabled = true
+site_url = "http://127.0.0.1:3000"
+additional_redirect_urls = ["http://127.0.0.1:3000"]
+# Sesión válida hasta 30 días desde el último acceso (en segundos).
+jwt_expiry = 2592000
+enable_refresh_token_rotation = true
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+# En local no exigimos confirmar el correo (sin SMTP real; ver Inbucket).
+enable_confirmations = false
