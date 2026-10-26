@@ -34,3 +34,5 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+# Kiro IDE workspace metadata (specs movidos a docs/spec)
+/.kiro/
