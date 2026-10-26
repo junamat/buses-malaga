@@ -6,8 +6,12 @@ import type { FiltroPosiciones, Pagina, Paginacion, Repository } from "@/lib/por
 // El handler resuelve el repositorio vía `getRepository`; lo sustituimos por un
 // doble para probar la lógica del route handler sin tocar Postgres.
 const listBuses = vi.fn();
+const listDestinos = vi.fn();
 vi.mock("@/lib/apiRepository", () => ({
-  getRepository: (): Pick<Repository, "listBuses"> => ({ listBuses }),
+  getRepository: (): Pick<Repository, "listBuses" | "listDestinos"> => ({
+    listBuses,
+    listDestinos,
+  }),
 }));
 
 import { GET } from "@/app/api/buses/route";
@@ -33,6 +37,8 @@ function req(query = ""): Request {
 
 beforeEach(() => {
   listBuses.mockReset();
+  listDestinos.mockReset();
+  listDestinos.mockResolvedValue([]);
 });
 
 describe("GET /api/buses", () => {
@@ -87,6 +93,44 @@ describe("GET /api/buses", () => {
     const paginacion = listBuses.mock.calls[0][1] as Paginacion;
     expect(paginacion.limite).toBe(50);
     expect(paginacion.cursor).toBe("200");
+  });
+
+  it("hereda el destino del (codLinea, sentido) de cada Bus y lo omite si no existe (2.8, 11.10)", async () => {
+    listBuses.mockResolvedValue(
+      pagina([bus(100, 7, 1), bus(101, 7, 2), bus(102, 3, 1)]),
+    );
+    // Solo (7,1) y (7,2) tienen Destino; (3,1) no.
+    listDestinos.mockResolvedValue([
+      { codLinea: 7, sentido: 1, destino: "San Andrés" },
+      { codLinea: 7, sentido: 2, destino: "Centro" },
+    ]);
+
+    const res = await GET(req());
+    const body = await res.json();
+
+    const [f71, f72, f31] = body.features;
+    expect(f71.properties.destino).toBe("San Andrés");
+    expect(f72.properties.destino).toBe("Centro");
+    // (3,1) no tiene Destino: la propiedad se omite, no se emite vacía ni null.
+    expect(f31.properties).not.toHaveProperty("destino");
+  });
+
+  it("propaga el filtro de líneas a la consulta de destinos", async () => {
+    listBuses.mockResolvedValue(pagina([]));
+
+    await GET(req("codLinea=1,7"));
+
+    expect(listDestinos).toHaveBeenCalledTimes(1);
+    expect(listDestinos.mock.calls[0][0]).toEqual({ codLineas: [1, 7] });
+  });
+
+  it("consulta todos los destinos cuando no hay filtro de líneas", async () => {
+    listBuses.mockResolvedValue(pagina([]));
+
+    await GET(req());
+
+    expect(listDestinos).toHaveBeenCalledTimes(1);
+    expect(listDestinos.mock.calls[0][0]).toBeUndefined();
   });
 
   it("responde 400 canónico ante un codLinea malformado (11.8)", async () => {

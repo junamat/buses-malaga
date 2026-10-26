@@ -13,12 +13,12 @@
     "supabase:start": "supabase start",
     "supabase:stop": "supabase stop",
     "supabase:status": "supabase status",
-    "db:apply:supabase-local": "psql \"${DATABASE_URL:-postgresql://postgres:postgres@127.0.0.1:54322/postgres}\" -v ON_ERROR_STOP=1 -f db/migrations/0001_schema_gtfs_dominio.sql -f db/migrations/0002_extensions_pg_cron_pg_net.sql",
+    "db:apply:supabase-local": "psql \"${DATABASE_URL:-postgresql://postgres:postgres@127.0.0.1:54322/postgres}\" -v ON_ERROR_STOP=1 -f db/migrations/0001_schema_gtfs_dominio.sql -f db/migrations/0002_extensions_pg_cron_pg_net.sql -f db/migrations/0003_route_directions_destinos.sql",
     "supabase:reset": "npm run supabase:stop && npm run supabase:start && npm run db:apply:supabase-local",
     "localpg:up": "docker compose up -d",
     "localpg:down": "docker compose down",
     "localpg:reset": "docker compose down -v && docker compose up -d",
-    "db:apply:local-postgres": "psql \"${DATABASE_URL:-postgresql://postgres:postgres@127.0.0.1:5432/buses_malaga}\" -v ON_ERROR_STOP=1 -f db/migrations/0001_schema_gtfs_dominio.sql"
+    "db:apply:local-postgres": "psql \"${DATABASE_URL:-postgresql://postgres:postgres@127.0.0.1:5432/buses_malaga}\" -v ON_ERROR_STOP=1 -f db/migrations/0001_schema_gtfs_dominio.sql -f db/migrations/0003_route_directions_destinos.sql"
   },
   "dependencies": {
     "leaflet": "1.9.4",

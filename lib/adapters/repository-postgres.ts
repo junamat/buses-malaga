@@ -45,6 +45,8 @@ import type {
   Aportacion,
   Bus,
   CodBus,
+  CodLinea,
+  DestinoGtfs,
   ExcepcionCalendarioGtfs,
   Favorito,
   FormaGtfs,
@@ -244,6 +246,20 @@ export function mapAportacion(row: AportacionRow): Aportacion {
   };
 }
 
+export interface DestinoRow extends QueryResultRow {
+  route_id: number | string;
+  sentido: number | string;
+  destino: string;
+}
+
+export function mapDestino(row: DestinoRow): DestinoGtfs {
+  return {
+    codLinea: toNumber(row.route_id),
+    sentido: toNumber(row.sentido),
+    destino: row.destino,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Helpers puros: construcción de sentencias SQL parametrizadas
 // ---------------------------------------------------------------------------
@@ -395,6 +411,33 @@ export function buildListBusesSql(
 }
 
 /**
+ * SQL de `listDestinos`: Destinos por `(route_id, sentido)` de
+ * `route_directions`, opcionalmente restringidos a un conjunto de líneas. Sin
+ * filtro (o con un conjunto vacío) devuelve todos los destinos conocidos. El
+ * orden por `(route_id, sentido)` ascendente hace el resultado estable para que
+ * el llamador construya un mapa determinista. (Requisitos 2.8, 11.10)
+ */
+export function buildListDestinosSql(filtro?: {
+  codLineas?: CodLinea[];
+}): SqlStatement {
+  if (filtro?.codLineas !== undefined && filtro.codLineas.length > 0) {
+    return {
+      text:
+        "SELECT route_id, sentido, destino FROM route_directions " +
+        "WHERE route_id = ANY($1::bigint[]) " +
+        "ORDER BY route_id ASC, sentido ASC",
+      params: [filtro.codLineas],
+    };
+  }
+  return {
+    text:
+      "SELECT route_id, sentido, destino FROM route_directions " +
+      "ORDER BY route_id ASC, sentido ASC",
+    params: [],
+  };
+}
+
+/**
  * SQL de `insertPosiciones`: inserción múltiple en `bus_positions` con una sola
  * sentencia (desenrollando `unnest` sobre arrays columnares). Devuelve `null`
  * cuando no hay capturas que insertar.
@@ -468,13 +511,15 @@ export function buildPurgePosicionesSql(ventanaSegundos: number): SqlStatement {
 /**
  * Orden de borrado de las tablas estáticas GTFS antes de repoblarlas. Respeta
  * las claves foráneas (`ON DELETE CASCADE` en el esquema): se borran primero las
- * tablas hijas y al final las padres (`routes`, `stops`). `bus_positions` no se
- * toca: la recarga GTFS solo afecta a los datos estáticos.
+ * tablas hijas y al final las padres (`routes`, `stops`). `route_directions`
+ * referencia a `routes`, por lo que se borra antes que ella. `bus_positions` no
+ * se toca: la recarga GTFS solo afecta a los datos estáticos.
  */
 export const ORDEN_BORRADO_GTFS = [
   "stop_times",
   "shapes",
   "calendar_dates",
+  "route_directions",
   "trips",
   "stops",
   "routes",
@@ -657,6 +702,35 @@ export function buildInsertShapesSql(shapes: FormaGtfs[]): SqlStatement | null {
   };
 }
 
+/**
+ * SQL de inserción múltiple de `route_directions` vía `unnest`: el Destino
+ * representativo por `(route_id, sentido)` derivado del GTFS. Devuelve `null`
+ * si no hay destinos. La FK sobre `route_id` rechaza pares sin línea en
+ * `routes`; el llamador deriva los destinos desde los mismos trips que repueblan
+ * `routes`, por lo que no se produce. (Requisito 2.8)
+ */
+export function buildInsertRouteDirectionsSql(
+  destinos: DestinoGtfs[],
+): SqlStatement | null {
+  if (destinos.length === 0) {
+    return null;
+  }
+  const routeId: number[] = [];
+  const sentido: number[] = [];
+  const destino: string[] = [];
+  for (const d of destinos) {
+    routeId.push(d.codLinea);
+    sentido.push(d.sentido);
+    destino.push(d.destino);
+  }
+  return {
+    text:
+      "INSERT INTO route_directions (route_id, sentido, destino) " +
+      "SELECT * FROM unnest($1::bigint[], $2::integer[], $3::text[])",
+    params: [routeId, sentido, destino],
+  };
+}
+
 /** SQL de `listFavoritos`: favoritos de un usuario, orden estable por `id`. */
 export function buildListFavoritosSql(userId: string): SqlStatement {
   return {
@@ -825,6 +899,14 @@ export class PostgresRepository implements Repository {
     return buildPagina(rows.map(mapBus), limite, offset);
   }
 
+  async listDestinos(filtro?: {
+    codLineas?: CodLinea[];
+  }): Promise<DestinoGtfs[]> {
+    const { text, params } = buildListDestinosSql(filtro);
+    const { rows } = await this.client.query<DestinoRow>(text, params);
+    return rows.map(mapDestino);
+  }
+
   async insertPosiciones(capturas: PosicionCaptura[]): Promise<void> {
     const statement = buildInsertPosicionesSql(capturas);
     if (statement === null) {
@@ -851,6 +933,9 @@ export class PostgresRepository implements Repository {
         buildInsertStopTimesSql(dataset.stopTimes),
         buildInsertCalendarDatesSql(dataset.calendarDates),
         buildInsertShapesSql(dataset.shapes),
+        // `route_directions` depende de `routes`: se inserta tras ella en la
+        // misma recarga transaccional (Requisito 2.8).
+        buildInsertRouteDirectionsSql(dataset.destinos),
       ];
       for (const statement of statements) {
         if (statement !== null) {

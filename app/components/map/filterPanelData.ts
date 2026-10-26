@@ -26,7 +26,7 @@
  * `./busLayerData`.
  */
 
-import type { CodLinea, CodParada } from "@/lib/types";
+import type { CodLinea, CodParada, Sentido } from "@/lib/types";
 import type { ParadaLineasLookup } from "@/lib/filters";
 import { fetchLineasFeatures, fetchParadas } from "./busLayerData";
 
@@ -35,27 +35,113 @@ export interface LineaOpcion {
   readonly codLinea: CodLinea;
   /** Nombre legible de la Línea, o `undefined` si el origen no lo aporta. */
   readonly nombre?: string;
+  /**
+   * Destinos legibles conocidos por Sentido para esta Línea (p. ej.
+   * `{1: "San Andrés", 2: "El Palo"}`), derivados de los Features por Sentido
+   * que expone `GET /api/lineas` (Requisito 2.8). Un Sentido sin Destino
+   * conocido no aparece en el mapa. Vacío cuando la Línea no tiene Destinos.
+   */
+  readonly destinos: Readonly<Record<Sentido, string>>;
 }
 
 /**
  * Obtiene el catálogo de Líneas seleccionables desde `GET /api/lineas`,
  * ordenado por `codLinea` ascendente para una presentación estable. Descarta
  * Líneas sin `codLinea` numérico (no deberían existir, es una salvaguarda).
+ *
+ * El endpoint expone una Línea con Destinos como varios Features (uno por
+ * Sentido con su `sentido` y `destino`); aquí se colapsan en una sola
+ * `LineaOpcion` por `codLinea`, acumulando sus Destinos por Sentido. Una Línea
+ * sin Destinos aparece como un único Feature sin `sentido`/`destino` y produce
+ * una `LineaOpcion` con `destinos` vacío (Requisitos 2.8, 11.10).
  */
 export async function fetchLineas(
   signal?: AbortSignal,
 ): Promise<LineaOpcion[]> {
   const features = await fetchLineasFeatures(signal);
-  const opciones: LineaOpcion[] = [];
+  // codLinea → opción en construcción (con sus destinos por sentido mutables).
+  const porCodLinea = new Map<
+    CodLinea,
+    { codLinea: CodLinea; nombre?: string; destinos: Record<Sentido, string> }
+  >();
   for (const feature of features) {
-    const { codLinea, nombre } = feature.properties;
+    const { codLinea, nombre, sentido, destino } = feature.properties;
     if (typeof codLinea !== "number") {
       continue;
     }
-    opciones.push({ codLinea, nombre });
+    let opcion = porCodLinea.get(codLinea);
+    if (opcion === undefined) {
+      opcion = { codLinea, nombre, destinos: {} };
+      porCodLinea.set(codLinea, opcion);
+    } else if (opcion.nombre === undefined && nombre !== undefined) {
+      // Conserva el primer nombre legible visto para la línea.
+      opcion.nombre = nombre;
+    }
+    if (typeof sentido === "number" && destino !== undefined && destino !== "") {
+      opcion.destinos[sentido] = destino;
+    }
   }
+
+  const opciones = [...porCodLinea.values()].map(
+    (opcion): LineaOpcion => ({
+      codLinea: opcion.codLinea,
+      nombre: opcion.nombre,
+      destinos: opcion.destinos,
+    }),
+  );
   opciones.sort((a, b) => a.codLinea - b.codLinea);
   return opciones;
+}
+
+/** Opción de Sentido ya resuelta para el control de filtro. */
+export interface SentidoEtiqueta {
+  readonly sentido: Sentido;
+  /** Etiqueta base del Sentido (p. ej. "Ida", "Vuelta"). */
+  readonly etiqueta: string;
+  /**
+   * Destino legible a mostrar junto al Sentido, o `undefined` si no hay uno
+   * aplicable al conjunto de Líneas seleccionadas (Requisito 2.8).
+   */
+  readonly destino?: string;
+}
+
+/**
+ * Resuelve el Destino legible a mostrar para cada Sentido del panel de filtros,
+ * en función de las Líneas seleccionadas (Requisito 2.8).
+ *
+ * El control de Sentido es global (no por Línea), mientras que el Destino es
+ * propio de cada `(codLinea, sentido)`. Para un Sentido dado se reúnen los
+ * Destinos conocidos de las Líneas seleccionadas; solo cuando todas coinciden
+ * en un único Destino se expone ese texto junto al Sentido. Si las Líneas
+ * seleccionadas discrepan, o si no hay Línea seleccionada, o si ninguna aporta
+ * Destino para ese Sentido, se devuelve solo la etiqueta base sin Destino
+ * (comportamiento "Ida/Vuelta" previo). Función pura y determinista.
+ */
+export function resolverSentidosConDestino(
+  sentidosBase: readonly SentidoEtiqueta[],
+  lineas: readonly LineaOpcion[],
+  lineasSeleccionadas: ReadonlySet<CodLinea>,
+): SentidoEtiqueta[] {
+  // Solo las Líneas seleccionadas aportan Destino; sin selección, no hay uno
+  // aplicable y se conserva el comportamiento base.
+  const seleccionadas = lineas.filter((linea) =>
+    lineasSeleccionadas.has(linea.codLinea),
+  );
+
+  return sentidosBase.map((opcion) => {
+    const destinos = new Set<string>();
+    for (const linea of seleccionadas) {
+      const destino = linea.destinos[opcion.sentido];
+      if (destino !== undefined && destino !== "") {
+        destinos.add(destino);
+      }
+    }
+    // Un único Destino común ⇒ se muestra; discrepancia o ausencia ⇒ sin texto.
+    if (destinos.size === 1) {
+      return { ...opcion, destino: [...destinos][0] };
+    }
+    return { sentido: opcion.sentido, etiqueta: opcion.etiqueta };
+  });
 }
 
 /**

@@ -87,9 +87,10 @@ import { applyFilters } from "./applyFilters";
 import {
   fetchLineas,
   fetchParadaLineasLookup,
+  resolverSentidosConDestino,
   type LineaOpcion,
 } from "./filterPanelData";
-import FilterPanel from "./FilterPanel";
+import FilterPanel, { SENTIDOS_POR_DEFECTO } from "./FilterPanel";
 
 /**
  * Intervalo de refresco de las posiciones de buses, en milisegundos. Coincide
@@ -342,7 +343,10 @@ function BusStopMarkers({
 
       {buses.map((bus) => {
         const [lon, lat] = bus.geometry.coordinates;
-        const { codBus, codLinea, sentido, obsoleto } = bus.properties;
+        const { codBus, codLinea, sentido, obsoleto, destino } = bus.properties;
+        // Requisito 2.8: el Destino real se muestra junto al Sentido cuando
+        // existe para el `(codLinea, sentido)` del Bus; si no, solo el Sentido.
+        const tieneDestino = destino !== undefined && destino !== "";
         return (
           <CircleMarker
             key={`bus-${codBus}`}
@@ -356,12 +360,16 @@ function BusStopMarkers({
             }}
           >
             <Tooltip direction="top" permanent>
-              {`L${codLinea} · S${sentido}`}
+              {tieneDestino
+                ? `L${codLinea} · S${sentido} · ${destino}`
+                : `L${codLinea} · S${sentido}`}
             </Tooltip>
             <Popup>
               <strong>Línea {codLinea}</strong>
               <br />
-              <span>Sentido {sentido}</span>
+              <span>
+                {tieneDestino ? `Sentido ${sentido} · ${destino}` : `Sentido ${sentido}`}
+              </span>
               <br />
               <span>Bus {codBus}</span>
             </Popup>
@@ -399,6 +407,18 @@ export default function MapaBase(): JSX.Element {
     useLineasCatalogo();
   // Asociación Parada → Líneas para el filtro por Línea sobre Paradas (3.1).
   const paradaLineas = useParadaLineasLookup(filterState.lineas);
+
+  // Opciones de Sentido con el Destino real por `(linea, sentido)` cuando
+  // existe para las Líneas seleccionadas (Requisito 2.8); si no, "Ida/Vuelta".
+  const sentidosConDestino = useMemo(
+    () =>
+      resolverSentidosConDestino(
+        SENTIDOS_POR_DEFECTO,
+        lineasCatalogo,
+        filterState.lineas,
+      ),
+    [lineasCatalogo, filterState.lineas],
+  );
 
   // Aplicación de los filtros al conjunto base delegando en `lib/filters.apply`
   // (vía `applyFilters`): AND de Línea y Sentido (3.1–3.3) y detección de
@@ -537,6 +557,7 @@ export default function MapaBase(): JSX.Element {
         lineas={lineasCatalogo}
         lineasSeleccionadas={filterState.lineas}
         sentidoSeleccionado={filterState.sentido}
+        sentidos={sentidosConDestino}
         sinResultados={filtrado.sinResultados}
         hayFiltrosActivos={hasActiveFilters(filterState)}
         cargandoLineas={cargandoLineas}

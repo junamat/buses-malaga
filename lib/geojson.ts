@@ -24,9 +24,12 @@
 
 import type {
   Bus,
+  CodLinea,
+  DestinoGtfs,
   Parada,
   Linea,
   Position,
+  Sentido,
   GeoJSONPoint,
   GeoJSONLineString,
   GeoJSONFeature,
@@ -35,6 +38,35 @@ import type {
   ParadaFeatureProperties,
   LineaFeatureProperties,
 } from "@/lib/types";
+
+// ---------------------------------------------------------------------------
+// Destino por (codLinea, sentido)
+// ---------------------------------------------------------------------------
+
+/**
+ * Mapa de consulta de Destinos por `(codLinea, sentido)`. Es lógica pura: quien
+ * serializa lo construye a partir de los Destinos conocidos (`Repository.
+ * listDestinos`) y lo inyecta, de modo que cada Bus/Linea hereda su Destino sin
+ * acceder a la base de datos. Un par sin Destino simplemente no está en el mapa
+ * y la propiedad `destino` se omite (Requisitos 2.8, 11.10).
+ */
+export type DestinoLookup = ReadonlyMap<string, string>;
+
+/** Clave canónica de un par `(codLinea, sentido)` para el `DestinoLookup`. */
+export function destinoKey(codLinea: CodLinea, sentido: Sentido): string {
+  return `${codLinea}|${sentido}`;
+}
+
+/** Construye un `DestinoLookup` a partir de los Destinos conocidos. */
+export function buildDestinoLookup(
+  destinos: readonly DestinoGtfs[],
+): DestinoLookup {
+  const lookup = new Map<string, string>();
+  for (const { codLinea, sentido, destino } of destinos) {
+    lookup.set(destinoKey(codLinea, sentido), destino);
+  }
+  return lookup;
+}
 
 // ---------------------------------------------------------------------------
 // Obsolescencia (derivada de la antigüedad de la captura)
@@ -97,32 +129,46 @@ export function isObsoleta(capturedAt: string, ctx: ObsolescenceContext): boolea
 export function busToFeature(
   bus: Bus,
   ctx: ObsolescenceContext,
+  destinos?: DestinoLookup,
 ): GeoJSONFeature<BusFeatureProperties, GeoJSONPoint> {
+  const properties: BusFeatureProperties = {
+    codBus: bus.codBus,
+    codLinea: bus.codLinea,
+    sentido: bus.sentido,
+    last_update: bus.last_update,
+    captured_at: bus.captured_at,
+    obsoleto: isObsoleta(bus.captured_at, ctx),
+  };
+
+  // El Destino se hereda del `(codLinea, sentido)` del Bus cuando existe; la
+  // propiedad se omite si ese par no tiene Destino (Requisitos 2.8, 11.10).
+  const destino = destinos?.get(destinoKey(bus.codLinea, bus.sentido));
+  if (destino !== undefined) {
+    properties.destino = destino;
+  }
+
   return {
     type: "Feature",
     geometry: {
       type: "Point",
       coordinates: [bus.lon, bus.lat],
     },
-    properties: {
-      codBus: bus.codBus,
-      codLinea: bus.codLinea,
-      sentido: bus.sentido,
-      last_update: bus.last_update,
-      captured_at: bus.captured_at,
-      obsoleto: isObsoleta(bus.captured_at, ctx),
-    },
+    properties,
   };
 }
 
-/** Serializa un conjunto de `Bus` a una `FeatureCollection` canónica. */
+/**
+ * Serializa un conjunto de `Bus` a una `FeatureCollection` canónica. Si se
+ * aporta `destinos`, cada Bus hereda el Destino de su `(codLinea, sentido)`.
+ */
 export function busesToFeatureCollection(
   buses: readonly Bus[],
   ctx: ObsolescenceContext,
+  destinos?: DestinoLookup,
 ): GeoJSONFeatureCollection<BusFeatureProperties, GeoJSONPoint> {
   return {
     type: "FeatureCollection",
-    features: buses.map((bus) => busToFeature(bus, ctx)),
+    features: buses.map((bus) => busToFeature(bus, ctx, destinos)),
   };
 }
 
@@ -232,6 +278,11 @@ export interface LineaConRecorrido {
   recorrido?: readonly Position[];
   /** Sentido al que corresponde el recorrido, si procede. */
   sentido?: number;
+  /**
+   * Destino legible del `(codLinea, sentido)` de esta entrada. Se omite la
+   * propiedad del Feature cuando no hay Destino conocido (Requisitos 2.8, 11.10).
+   */
+  destino?: string;
 }
 
 /**
@@ -250,6 +301,9 @@ export function lineaToFeature(
   }
   if (entry.sentido !== undefined) {
     properties.sentido = entry.sentido;
+  }
+  if (entry.destino !== undefined) {
+    properties.destino = entry.destino;
   }
 
   return {
@@ -294,6 +348,9 @@ export function featureToLinea(
   };
   if (feature.properties.sentido !== undefined) {
     entry.sentido = feature.properties.sentido;
+  }
+  if (feature.properties.destino !== undefined) {
+    entry.destino = feature.properties.destino;
   }
   return entry;
 }

@@ -26,7 +26,7 @@
 import { NextResponse } from "next/server";
 
 import type { FiltroPosiciones } from "@/lib/ports";
-import { busesToFeatureCollection } from "@/lib/geojson";
+import { busesToFeatureCollection, buildDestinoLookup } from "@/lib/geojson";
 import { toResponse } from "@/lib/apiErrors";
 import {
   parseCodLineas,
@@ -65,12 +65,23 @@ export async function GET(request: Request): Promise<Response> {
     filtro.sentido = sentido;
   }
 
-  // 3. Consultar la página de buses y serializar a GeoJSON canónico. El
-  //    indicador de obsolescencia usa el instante de la petición como `now`.
-  const pagina = await getRepository().listBuses(filtro, paginacion);
-  const featureCollection = busesToFeatureCollection(pagina.items, {
-    now: Date.now(),
-  });
+  // 3. Consultar la página de buses y el mapa de Destinos por
+  //    `(codLinea, sentido)`. El filtro de líneas se propaga a los Destinos para
+  //    acotar la consulta a las líneas visibles.
+  const repo = getRepository();
+  const [pagina, destinos] = await Promise.all([
+    repo.listBuses(filtro, paginacion),
+    repo.listDestinos(codLineas !== undefined ? { codLineas } : undefined),
+  ]);
+
+  // 4. Serializar a GeoJSON canónico. Cada Bus hereda el Destino de su
+  //    `(codLinea, sentido)` cuando existe (Requisitos 2.8, 11.10); el indicador
+  //    de obsolescencia usa el instante de la petición como `now`.
+  const featureCollection = busesToFeatureCollection(
+    pagina.items,
+    { now: Date.now() },
+    buildDestinoLookup(destinos),
+  );
 
   return NextResponse.json({ ...featureCollection, next: pagina.next });
 }

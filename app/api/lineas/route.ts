@@ -23,6 +23,7 @@ import { lineasToFeatureCollection, type LineaConRecorrido } from "@/lib/geojson
 import { toResponse } from "@/lib/apiErrors";
 import { parsePaginacion, isApiError } from "@/lib/apiQuery";
 import { getRepository } from "@/lib/apiRepository";
+import type { CodLinea, DestinoGtfs, Linea, Sentido } from "@/lib/types";
 
 export async function GET(request: Request): Promise<Response> {
   const { searchParams } = new URL(request.url);
@@ -33,12 +34,57 @@ export async function GET(request: Request): Promise<Response> {
     return toResponse(paginacion);
   }
 
-  // 2. Consultar la página de líneas y serializar a GeoJSON canónico. El
-  //    recorrido no se expone en este endpoint: cada línea se serializa con una
-  //    geometría LineString sin vértices.
-  const pagina = await getRepository().listLineas(paginacion);
-  const entries: LineaConRecorrido[] = pagina.items.map((linea) => ({ linea }));
+  // 2. Consultar la página de líneas y los Destinos conocidos por
+  //    `(codLinea, sentido)`. El recorrido no se expone en este endpoint: cada
+  //    línea se serializa con una geometría LineString sin vértices.
+  const repo = getRepository();
+  const [pagina, destinos] = await Promise.all([
+    repo.listLineas(paginacion),
+    repo.listDestinos(),
+  ]);
+
+  // 3. Construir las entradas a serializar. Una línea con Destinos conocidos se
+  //    expone con un Feature por cada Sentido (con su `sentido` y `destino`);
+  //    una línea sin Destino conocido se expone con un único Feature sin esas
+  //    propiedades, preservando la salida base (Requisitos 2.8, 11.10).
+  const entries = buildLineaEntries(pagina.items, destinos);
   const featureCollection = lineasToFeatureCollection(entries);
 
   return NextResponse.json({ ...featureCollection, next: pagina.next });
+}
+
+/**
+ * Compone las entradas de serialización de líneas: para cada línea, un Feature
+ * por Sentido con Destino conocido (ordenado por `sentido`), o un único Feature
+ * sin Sentido/Destino cuando la línea no tiene Destinos. Se omite la propiedad
+ * `destino` en lugar de emitir un valor vacío (Requisitos 2.8, 11.10).
+ */
+function buildLineaEntries(
+  lineas: readonly Linea[],
+  destinos: readonly DestinoGtfs[],
+): LineaConRecorrido[] {
+  // codLinea → (sentido → destino), ordenable por sentido de forma determinista.
+  const porLinea = new Map<CodLinea, Map<Sentido, string>>();
+  for (const { codLinea, sentido, destino } of destinos) {
+    let sentidos = porLinea.get(codLinea);
+    if (sentidos === undefined) {
+      sentidos = new Map<Sentido, string>();
+      porLinea.set(codLinea, sentidos);
+    }
+    sentidos.set(sentido, destino);
+  }
+
+  const entries: LineaConRecorrido[] = [];
+  for (const linea of lineas) {
+    const sentidos = porLinea.get(linea.codLinea);
+    if (sentidos === undefined || sentidos.size === 0) {
+      entries.push({ linea });
+      continue;
+    }
+    const sentidosOrdenados = [...sentidos.keys()].sort((a, b) => a - b);
+    for (const sentido of sentidosOrdenados) {
+      entries.push({ linea, sentido, destino: sentidos.get(sentido) });
+    }
+  }
+  return entries;
 }

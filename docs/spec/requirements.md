@@ -21,7 +21,8 @@ Las funcionalidades relativas a barrios/distritos (Requisito 10) y parte de las 
 - **Servicio_Autenticacion**: El componente que gestiona la identidad y la sesión del usuario.
 - **Bus**: Un vehículo concreto de la EMT, identificado de forma única por `codBus`.
 - **Linea**: Una línea de la EMT, identificada por `codLinea` (equivalente a `route_id` del GTFS).
-- **Sentido**: La dirección de recorrido de un vehículo o parada dentro de una línea (`sentido`).
+- **Sentido**: La dirección de recorrido de un vehículo o parada dentro de una línea (`sentido`), representada como entero (1/2 en la convención de la EMT).
+- **Destino**: El letrero de destino legible asociado a un `(Linea, Sentido)` (p. ej. "San Andrés"), derivado del `trip_headsign` del GTFS. Es el texto de dirección mostrado al usuario; un Bus hereda el Destino de su `(Linea, Sentido)`.
 - **Parada**: Un punto de parada de la EMT, identificado por `codParada`, con nombre legible y coordenadas.
 - **ETA**: Tiempo estimado de llegada (Estimated Time of Arrival), expresado en minutos.
 - **GeoJSON_Canonico**: Representación de salida del sistema como `FeatureCollection` con coordenadas numéricas en orden `[lon, lat]`.
@@ -57,6 +58,7 @@ Las funcionalidades relativas a barrios/distritos (Requisito 10) y parte de las 
 5. WHEN se actualizan las posiciones de los buses conforme a la resolución de refresco de 1 minuto definida en el Requisito 12, THE Frontend_Mapa SHALL actualizar las posiciones mostradas con los datos de la captura más reciente disponible.
 6. IF no existen posiciones de buses disponibles para el criterio de visualización actual, THEN THE Frontend_Mapa SHALL indicar al usuario que no hay buses que mostrar.
 7. IF las posiciones mostradas quedan obsoletas porque un fallo de ingesta (según el Requisito 12) impide su actualización, THEN THE Frontend_Mapa SHALL indicar al usuario la antigüedad de los datos mostrados y su condición de obsoletos.
+8. WHERE existe un Destino legible para el `(Linea, Sentido)` de un Bus, THE Frontend_Mapa SHALL mostrar ese Destino junto al Sentido de ese Bus; IF no existe Destino para ese `(Linea, Sentido)`, THEN THE Frontend_Mapa SHALL mostrar únicamente el Sentido sin texto de destino.
 
 ### Requirement 3: Filtrado de la visualización por línea y otros criterios
 
@@ -179,6 +181,7 @@ Las funcionalidades relativas a barrios/distritos (Requisito 10) y parte de las 
 7. IF un cliente solicita un recurso inexistente, THEN THE API_REST SHALL responder indicando que el recurso no se ha encontrado.
 8. IF una petición a la API_REST es sintácticamente incorrecta, THEN THE API_REST SHALL responder con un error de cliente y un cuerpo de respuesta que indique que la petición es incorrecta.
 9. IF una petición a la API_REST omite uno o más parámetros obligatorios, THEN THE API_REST SHALL responder con un error de cliente y un cuerpo de respuesta que identifique los parámetros obligatorios ausentes.
+10. WHERE existe un Destino para un `(Linea, Sentido)`, THE API_REST SHALL incluir ese Destino en las propiedades de los Buses de ese `(Linea, Sentido)` y en las de las Lineas que expone por Sentido; IF no existe Destino para ese `(Linea, Sentido)`, THEN THE API_REST SHALL omitir la propiedad de Destino en lugar de devolver un valor vacío.
 
 ### Requirement 12: Ingesta y actualización de datos
 

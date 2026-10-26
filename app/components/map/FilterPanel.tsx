@@ -33,8 +33,14 @@ import type { LineaOpcion } from "./filterPanelData";
 /** Opción de Sentido presentada en el control (además de "todos"). */
 export interface SentidoOpcion {
   readonly sentido: Sentido;
-  /** Etiqueta legible (p. ej. "Ida", "Vuelta"). */
+  /** Etiqueta legible del Sentido (p. ej. "Ida", "Vuelta"). */
   readonly etiqueta: string;
+  /**
+   * Destino legible a mostrar junto al Sentido cuando existe para el conjunto
+   * de Líneas seleccionadas (Requisito 2.8). Omitido cuando no hay Destino
+   * aplicable: en ese caso se muestra solo el Sentido.
+   */
+  readonly destino?: string;
 }
 
 /**
@@ -197,7 +203,11 @@ export default function FilterPanel({
               onChange={() => onSentidoChange(opcion.sentido)}
               style={{ marginRight: 6 }}
             />
-            {opcion.etiqueta}
+            {/* Requisito 2.8: se muestra el Destino real junto al Sentido
+                cuando existe; en su ausencia, solo el Sentido ("Ida"/"Vuelta"). */}
+            {opcion.destino !== undefined
+              ? `${opcion.etiqueta} · ${opcion.destino}`
+              : opcion.etiqueta}
           </label>
         ))}
       </div>

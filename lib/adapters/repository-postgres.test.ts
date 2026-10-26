@@ -22,7 +22,11 @@ import {
   mapBus,
   mapFavorito,
   mapAportacion,
+  mapDestino,
   buildListLineasSql,
+  buildListDestinosSql,
+  buildInsertRouteDirectionsSql,
+  ORDEN_BORRADO_GTFS,
   buildListParadasSql,
   buildFindParadasCercanasSql,
   buildListBusesSql,
@@ -41,7 +45,7 @@ import {
   MAX_PAGE_LIMIT,
   APORTACION_VIGENCIA_SEGUNDOS,
 } from "@/lib/adapters/repository-postgres";
-import type { PosicionCaptura } from "@/lib/types";
+import type { DestinoGtfs, PosicionCaptura } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Doble de QueryClient: captura las llamadas y devuelve filas programadas.
@@ -232,6 +236,12 @@ describe("mapeadores de fila", () => {
     expect(a.codBus).toBe(900);
     expect(a.created_at).toBe("2024-01-01T00:00:00.000Z");
   });
+
+  it("mapDestino convierte route_id y sentido a número preservando el destino", () => {
+    expect(
+      mapDestino({ route_id: "7", sentido: "1", destino: "San Andrés" }),
+    ).toEqual({ codLinea: 7, sentido: 1, destino: "San Andrés" });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -308,6 +318,54 @@ describe("construcción de SQL", () => {
     const { text, params } = buildListBusesSql({ codLineas: [] }, 50, 0);
     expect(text).not.toContain(") latest WHERE");
     expect(params).toEqual([VENTANA_SERVICIO_SEGUNDOS, 51, 0]);
+  });
+
+  it("buildListDestinosSql sin filtro recorre todos los destinos", () => {
+    const { text, params } = buildListDestinosSql();
+    expect(text).toContain("FROM route_directions");
+    expect(text).not.toContain("WHERE");
+    expect(text).toContain("ORDER BY route_id ASC, sentido ASC");
+    expect(params).toEqual([]);
+  });
+
+  it("buildListDestinosSql restringe por conjunto de líneas con ANY", () => {
+    const { text, params } = buildListDestinosSql({ codLineas: [7, 3] });
+    expect(text).toContain("route_id = ANY($1::bigint[])");
+    expect(params).toEqual([[7, 3]]);
+  });
+
+  it("buildListDestinosSql ignora un conjunto de líneas vacío", () => {
+    const { text, params } = buildListDestinosSql({ codLineas: [] });
+    expect(text).not.toContain("WHERE");
+    expect(params).toEqual([]);
+  });
+
+  it("buildInsertRouteDirectionsSql devuelve null sin destinos", () => {
+    expect(buildInsertRouteDirectionsSql([])).toBeNull();
+  });
+
+  it("buildInsertRouteDirectionsSql desenrolla columnas con unnest", () => {
+    const destinos: DestinoGtfs[] = [
+      { codLinea: 7, sentido: 1, destino: "San Andrés" },
+      { codLinea: 7, sentido: 2, destino: "Centro" },
+    ];
+    const stmt = buildInsertRouteDirectionsSql(destinos)!;
+    expect(stmt.text).toContain("INSERT INTO route_directions");
+    expect(stmt.text).toContain(
+      "unnest($1::bigint[], $2::integer[], $3::text[])",
+    );
+    expect(stmt.params).toEqual([
+      [7, 7],
+      [1, 2],
+      ["San Andrés", "Centro"],
+    ]);
+  });
+
+  it("ORDEN_BORRADO_GTFS borra route_directions antes que su padre routes", () => {
+    const idxDirecciones = ORDEN_BORRADO_GTFS.indexOf("route_directions");
+    const idxRoutes = ORDEN_BORRADO_GTFS.indexOf("routes");
+    expect(idxDirecciones).toBeGreaterThanOrEqual(0);
+    expect(idxDirecciones).toBeLessThan(idxRoutes);
   });
 
   it("buildInsertPosicionesSql devuelve null sin capturas", () => {
@@ -462,6 +520,53 @@ describe("PostgresRepository", () => {
       DEFAULT_PAGE_LIMIT + 1,
       50,
     ]);
+  });
+
+  it("listDestinos mapea filas y propaga el filtro de líneas al SQL", async () => {
+    const { client, calls } = fakeClient([
+      { route_id: 7, sentido: 1, destino: "San Andrés" },
+      { route_id: 7, sentido: 2, destino: "Centro" },
+    ]);
+    const repo = new PostgresRepository(client);
+    const destinos = await repo.listDestinos({ codLineas: [7] });
+    expect(destinos).toEqual([
+      { codLinea: 7, sentido: 1, destino: "San Andrés" },
+      { codLinea: 7, sentido: 2, destino: "Centro" },
+    ]);
+    expect(calls[0].text).toContain("route_id = ANY($1::bigint[])");
+    expect(calls[0].params).toEqual([[7]]);
+  });
+
+  it("recargarGtfs repuebla route_directions en la misma recarga (borra y reinserta)", async () => {
+    const { client, calls } = fakeClient();
+    const repo = new PostgresRepository(client);
+    await repo.recargarGtfs({
+      routes: [{ codLinea: 7 }],
+      trips: [],
+      stops: [],
+      stopTimes: [],
+      calendarDates: [],
+      shapes: [],
+      destinos: [{ codLinea: 7, sentido: 1, destino: "San Andrés" }],
+    });
+
+    // Se borra route_directions (antes que routes) y se reinserta en la misma
+    // secuencia de sentencias, sin transacción cuando el cliente no la soporta.
+    const textos = calls.map((c) => c.text);
+    const idxBorrado = textos.findIndex((t) =>
+      t.includes("DELETE FROM route_directions"),
+    );
+    const idxBorradoRoutes = textos.findIndex((t) =>
+      t.includes("DELETE FROM routes"),
+    );
+    const idxInsert = textos.findIndex((t) =>
+      t.includes("INSERT INTO route_directions"),
+    );
+    expect(idxBorrado).toBeGreaterThanOrEqual(0);
+    expect(idxBorrado).toBeLessThan(idxBorradoRoutes);
+    expect(idxInsert).toBeGreaterThanOrEqual(0);
+    const insert = calls[idxInsert];
+    expect(insert.params).toEqual([[7], [1], ["San Andrés"]]);
   });
 
   it("insertPosiciones no consulta cuando no hay capturas", async () => {

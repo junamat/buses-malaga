@@ -52,6 +52,7 @@ import type { HttpTransport, IngestResult } from "@/lib/ports";
 import type {
   CodLinea,
   CodParada,
+  DestinoGtfs,
   ExcepcionCalendarioGtfs,
   FormaGtfs,
   GtfsDataset,
@@ -226,8 +227,13 @@ function desentrecomillar(campo: string): string {
 
 /**
  * Normaliza `routes.csv` a `RutaGtfs[]`. `route_id` (= `codLinea`) debe ser un
- * entero; el nombre legible se toma de `route_short_name`, con `route_long_name`
- * como alternativa. Las filas sin `route_id` válido se descartan.
+ * entero; el nombre legible se toma de `route_long_name` (el nombre de display,
+ * p. ej. "Parque del Sur - Alameda Principal - San Andrés"), con
+ * `route_short_name` como alternativa. En el GTFS de la EMT el
+ * `route_short_name` coincide con el `route_id` (el número de línea), por lo que
+ * usarlo como nombre no aportaría nada más que el código ya presente en
+ * `codLinea`; el trayecto legible vive en `route_long_name`. Las filas sin
+ * `route_id` válido se descartan.
  */
 export function normalizarRoutes(filas: FilaCsv[]): RutaGtfs[] {
   const routes: RutaGtfs[] = [];
@@ -237,8 +243,8 @@ export function normalizarRoutes(filas: FilaCsv[]): RutaGtfs[] {
       continue;
     }
     const nombre =
-      textoOpcional(fila["route_short_name"]) ??
-      textoOpcional(fila["route_long_name"]);
+      textoOpcional(fila["route_long_name"]) ??
+      textoOpcional(fila["route_short_name"]);
     const ruta: RutaGtfs = { codLinea };
     if (nombre !== undefined) {
       ruta.nombre = nombre;
@@ -277,6 +283,10 @@ export function normalizarTrips(filas: FilaCsv[]): ViajeGtfsNormalizado[] {
     if (sentido !== null) {
       viaje.sentido = sentido;
     }
+    const destino = textoOpcional(fila["trip_headsign"]);
+    if (destino !== undefined) {
+      viaje.destino = destino;
+    }
     const serviceId = textoOpcional(fila["service_id"]);
     if (serviceId !== undefined) {
       viaje.serviceId = serviceId;
@@ -308,13 +318,77 @@ export function directionIdASentido(value: unknown): Sentido | null {
 
 /** Proyecta los `trips` normalizados al modelo de la tabla `trips`. */
 function aViajesGtfs(trips: ViajeGtfsNormalizado[]): ViajeGtfs[] {
-  return trips.map(({ tripId, codLinea, sentido }) => {
+  return trips.map(({ tripId, codLinea, sentido, destino }) => {
     const viaje: ViajeGtfs = { tripId, codLinea };
     if (sentido !== undefined) {
       viaje.sentido = sentido;
     }
+    if (destino !== undefined) {
+      viaje.destino = destino;
+    }
     return viaje;
   });
+}
+
+/**
+ * Deriva el Destino representativo por `(codLinea, sentido)` a partir de los
+ * viajes normalizados. Agrega los `trip_headsign` de los viajes de cada par y
+ * elige el **más frecuente**; los empates se resuelven por **orden
+ * lexicográfico** (el menor según `String.prototype.localeCompare`), de modo
+ * que para un mismo multiconjunto de headsign la elección sea siempre la misma
+ * (derivación determinista, Property 41).
+ *
+ * Solo se consideran los viajes con `sentido` y `destino` conocidos: sin
+ * sentido no puede asociarse el Destino al `(codLinea, sentido)` de las
+ * posiciones, y sin headsign no hay texto que exponer. Los pares sin ningún
+ * viaje con destino se omiten (no se inventa un Destino vacío). El resultado se
+ * ordena por `(codLinea, sentido)` para que la salida sea estable.
+ */
+export function derivarDestinos(trips: ViajeGtfs[]): DestinoGtfs[] {
+  // (codLinea, sentido) → (headsign → frecuencia).
+  const porParSentido = new Map<string, Map<string, number>>();
+
+  for (const trip of trips) {
+    if (trip.sentido === undefined || trip.destino === undefined) {
+      continue;
+    }
+    const clave = `${trip.codLinea}|${trip.sentido}`;
+    const frecuencias = porParSentido.get(clave) ?? new Map<string, number>();
+    frecuencias.set(trip.destino, (frecuencias.get(trip.destino) ?? 0) + 1);
+    porParSentido.set(clave, frecuencias);
+  }
+
+  const destinos: DestinoGtfs[] = [];
+  for (const [clave, frecuencias] of porParSentido) {
+    const [codLineaStr, sentidoStr] = clave.split("|");
+    const codLinea = Number(codLineaStr) as CodLinea;
+    const sentido = Number(sentidoStr) as Sentido;
+
+    // Headsign más frecuente; empate resuelto por orden lexicográfico.
+    let elegido: string | undefined;
+    let mejorFrecuencia = -1;
+    for (const [headsign, frecuencia] of frecuencias) {
+      if (
+        frecuencia > mejorFrecuencia ||
+        (frecuencia === mejorFrecuencia &&
+          elegido !== undefined &&
+          headsign.localeCompare(elegido) < 0)
+      ) {
+        elegido = headsign;
+        mejorFrecuencia = frecuencia;
+      }
+    }
+
+    if (elegido !== undefined) {
+      destinos.push({ codLinea, sentido, destino: elegido });
+    }
+  }
+
+  destinos.sort((a, b) =>
+    a.codLinea !== b.codLinea ? a.codLinea - b.codLinea : a.sentido - b.sentido,
+  );
+
+  return destinos;
 }
 
 /**
@@ -602,13 +676,16 @@ export function normalizarGtfs(cuerpos: CuerposGtfs): GtfsDataset {
     shapeIdARutaSentido,
   );
 
+  const trips = aViajesGtfs(tripsNorm);
+
   return {
     routes,
-    trips: aViajesGtfs(tripsNorm),
+    trips,
     stops,
     stopTimes,
     calendarDates,
     shapes,
+    destinos: derivarDestinos(trips),
   };
 }
 

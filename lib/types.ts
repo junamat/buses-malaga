@@ -107,6 +107,27 @@ export interface ViajeGtfs {
   tripId: string;
   codLinea: CodLinea;
   sentido?: Sentido;
+  /**
+   * Letrero de destino legible del viaje (`trip_headsign` del GTFS), p. ej.
+   * "San Andrés". Opcional: puede faltar en el origen. Es la base de la que se
+   * deriva el Destino representativo por `(codLinea, sentido)` (ver
+   * {@link DestinoGtfs}).
+   */
+  destino?: string;
+}
+
+/**
+ * Destino representativo de un recorrido línea/sentido (entidad derivada de los
+ * `trip_headsign` de los viajes GTFS). Se agrega por `(codLinea, sentido)`: el
+ * headsign más frecuente entre los viajes de ese par, con los empates resueltos
+ * por orden lexicográfico para que la derivación sea determinista. Un Bus
+ * hereda su Destino de este par. Se persiste en la tabla `route_directions`.
+ */
+export interface DestinoGtfs {
+  codLinea: CodLinea;
+  sentido: Sentido;
+  /** Letrero de destino legible (headsign representativo del GTFS). */
+  destino: string;
 }
 
 /**
@@ -162,6 +183,12 @@ export interface GtfsDataset {
   stopTimes: StopTimeGtfs[];
   calendarDates: ExcepcionCalendarioGtfs[];
   shapes: FormaGtfs[];
+  /**
+   * Destinos representativos por `(codLinea, sentido)` derivados de los
+   * `trip_headsign` de los viajes. Repueblan la tabla `route_directions` en la
+   * misma recarga transaccional que el resto de tablas estáticas.
+   */
+  destinos: DestinoGtfs[];
 }
 
 /**
@@ -259,6 +286,11 @@ export interface BusFeatureProperties {
   captured_at: string;
   /** Indicador de obsolescencia derivado de la antigüedad de la captura. */
   obsoleto: boolean;
+  /**
+   * Destino legible heredado del `(codLinea, sentido)` del Bus. Se omite la
+   * propiedad cuando ese par no tiene Destino conocido (Requisitos 2.8, 11.10).
+   */
+  destino?: string;
 }
 
 /** Propiedades del Feature de una Parada en el GeoJSON canónico. */
@@ -272,4 +304,9 @@ export interface LineaFeatureProperties {
   codLinea: CodLinea;
   nombre?: string;
   sentido?: Sentido;
+  /**
+   * Destino legible del `(codLinea, sentido)` del Feature. Se omite la
+   * propiedad cuando ese par no tiene Destino conocido (Requisitos 2.8, 11.10).
+   */
+  destino?: string;
 }

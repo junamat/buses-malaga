@@ -5,19 +5,20 @@
 # correr la app y la suite de tests sin depender de Supabase ni de su Docker.
 #
 # En esta Vía:
-#   - Se aplica SOLO la migración 0001 (esquema + PostGIS). La 0002
-#     (pg_cron/pg_net) NO se aplica: esas extensiones no existen en esta imagen
-#     y su ingesta la dispara el adaptador `node-worker` + `POST /api/ingest`.
+#   - Se aplican las migraciones portables 0001 (esquema + PostGIS) y 0003
+#     (route_directions). La 0002 (pg_cron/pg_net) NO se aplica: esas
+#     extensiones no existen en esta imagen y su ingesta la dispara el
+#     adaptador `node-worker` + `POST /api/ingest`.
 #   - La autenticación la cubre el adaptador `local-auth` (usuario de
 #     desarrollo), no GoTrue.
 #
-# La migración 0001 se monta en `/docker-entrypoint-initdb.d/`, que la imagen
-# ejecuta automáticamente SOLO la primera vez que se crea el volumen de datos.
-# Si cambias la migración, recrea el volumen: `npm run localpg:reset`.
+# Las migraciones 0001 y 0003 se montan en `/docker-entrypoint-initdb.d/`, que
+# la imagen ejecuta automáticamente SOLO la primera vez que se crea el volumen
+# de datos. Si cambias una migración, recrea el volumen: `npm run localpg:reset`.
 #
 # Arranque:   npm run localpg:up     (docker compose up -d)
 # Parada:     npm run localpg:down   (docker compose down)
-# Reset:      npm run localpg:reset  (down -v + up, re-aplica 0001 desde cero)
+# Reset:      npm run localpg:reset  (down -v + up, re-aplica 0001+0003 desde cero)
 #
 # Validación estática sin demonio Docker: `docker compose config`.
 # =============================================================================
@@ -39,10 +40,11 @@ services:
     volumes:
       # Datos persistentes entre reinicios (se borran con `down -v`).
       - buses_malaga_pgdata:/var/lib/postgresql/data
-      # Solo la migración 0001 (portable). La 0002 (pg_cron/pg_net) se omite
-      # deliberadamente en esta Vía. El sufijo numérico fija el orden de
-      # ejecución dentro de initdb.
+      # Migraciones portables 0001 (esquema + PostGIS) y 0003 (route_directions).
+      # La 0002 (pg_cron/pg_net) se omite deliberadamente en esta Vía. El sufijo
+      # numérico fija el orden de ejecución dentro de initdb.
       - ./db/migrations/0001_schema_gtfs_dominio.sql:/docker-entrypoint-initdb.d/0001_schema_gtfs_dominio.sql:ro
+      - ./db/migrations/0003_route_directions_destinos.sql:/docker-entrypoint-initdb.d/0003_route_directions_destinos.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d buses_malaga"]
       interval: 5s

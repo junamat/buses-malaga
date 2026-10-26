@@ -23,6 +23,7 @@ import type {
   CodBus,
   CodLinea,
   CodParada,
+  DestinoGtfs,
   Favorito,
   Aportacion,
   GtfsDataset,
@@ -99,6 +100,16 @@ export interface Repository {
   ): Promise<Pagina<Parada>>;
 
   /**
+   * Destinos representativos por `(codLinea, sentido)` (tabla
+   * `route_directions`), opcionalmente restringidos a un conjunto de líneas.
+   * El llamador (la API) construye un mapa `(codLinea, sentido) → destino` para
+   * heredar el Destino a cada Bus en `GET /api/buses` y exponerlo por sentido en
+   * `GET /api/lineas`. Sin filtro devuelve todos los destinos conocidos. Un par
+   * sin Destino simplemente no aparece en el resultado. (Requisitos 2.8, 11.10)
+   */
+  listDestinos(filtro?: { codLineas?: CodLinea[] }): Promise<DestinoGtfs[]>;
+
+  /**
    * Hasta `limite` paradas dentro de `radioMetros` del punto dado, ordenadas
    * por distancia ascendente, con la distancia en metros (PostGIS).
    * (Requisitos 6.2, 6.6)
@@ -125,9 +136,11 @@ export interface Repository {
 
   /**
    * Repuebla las tablas estáticas GTFS (`routes`, `trips`, `stops`,
-   * `stop_times`, `calendar_dates`, `shapes`) a partir de un conjunto ya
-   * normalizado, reconstruyendo la geometría `shapes.geom_linestring` (PostGIS
-   * LINESTRING, SRID 4326) desde los puntos de cada recorrido.
+   * `stop_times`, `calendar_dates`, `shapes`, `route_directions`) a partir de
+   * un conjunto ya normalizado, reconstruyendo la geometría
+   * `shapes.geom_linestring` (PostGIS LINESTRING, SRID 4326) desde los puntos de
+   * cada recorrido y repoblando los Destinos por `(codLinea, sentido)` en
+   * `route_directions` (Requisito 2.8).
    *
    * La recarga es atómica (todo o nada): se ejecuta en una transacción de modo
    * que un fallo a mitad de camino conserva los datos previos sin dejar las

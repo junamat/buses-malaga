@@ -4,8 +4,12 @@ import type { Linea } from "@/lib/types";
 import type { Pagina, Paginacion, Repository } from "@/lib/ports";
 
 const listLineas = vi.fn();
+const listDestinos = vi.fn();
 vi.mock("@/lib/apiRepository", () => ({
-  getRepository: (): Pick<Repository, "listLineas"> => ({ listLineas }),
+  getRepository: (): Pick<Repository, "listLineas" | "listDestinos"> => ({
+    listLineas,
+    listDestinos,
+  }),
 }));
 
 import { GET } from "@/app/api/lineas/route";
@@ -20,6 +24,8 @@ function req(query = ""): Request {
 
 beforeEach(() => {
   listLineas.mockReset();
+  listDestinos.mockReset();
+  listDestinos.mockResolvedValue([]);
 });
 
 describe("GET /api/lineas", () => {
@@ -51,6 +57,47 @@ describe("GET /api/lineas", () => {
     const body = await res.json();
     expect(body.features[0].properties.codLinea).toBe(13);
     expect(body.features[0].properties).not.toHaveProperty("nombre");
+  });
+
+  it("expone un Feature por Sentido con Destino conocido (2.8, 11.10)", async () => {
+    listLineas.mockResolvedValue(pagina([{ codLinea: 7, nombre: "Línea 7" }]));
+    listDestinos.mockResolvedValue([
+      // Desordenados a propósito: la salida debe ordenarse por sentido.
+      { codLinea: 7, sentido: 2, destino: "Centro" },
+      { codLinea: 7, sentido: 1, destino: "San Andrés" },
+    ]);
+
+    const res = await GET(req());
+    const body = await res.json();
+
+    expect(body.features).toHaveLength(2);
+    const [f1, f2] = body.features;
+    expect(f1.properties).toMatchObject({
+      codLinea: 7,
+      sentido: 1,
+      destino: "San Andrés",
+    });
+    expect(f2.properties).toMatchObject({
+      codLinea: 7,
+      sentido: 2,
+      destino: "Centro",
+    });
+  });
+
+  it("expone un único Feature sin sentido ni destino cuando la línea no tiene Destino (11.10)", async () => {
+    listLineas.mockResolvedValue(pagina([{ codLinea: 13, nombre: "Línea 13" }]));
+    // Destinos de otra línea: no afectan a la 13.
+    listDestinos.mockResolvedValue([
+      { codLinea: 7, sentido: 1, destino: "San Andrés" },
+    ]);
+
+    const res = await GET(req());
+    const body = await res.json();
+
+    expect(body.features).toHaveLength(1);
+    expect(body.features[0].properties.codLinea).toBe(13);
+    expect(body.features[0].properties).not.toHaveProperty("sentido");
+    expect(body.features[0].properties).not.toHaveProperty("destino");
   });
 
   it("reenvía la paginación (11.3)", async () => {

@@ -1,12 +1,15 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  derivarDestinos,
   directionIdASentido,
+  normalizarRoutes,
   normalizarStops,
   normalizarGtfs,
   parsearCsvConCabecera,
   type CuerposGtfs,
 } from "@/lib/gtfs";
+import type { ViajeGtfs } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // normalizarStops — stops.csv GTFS estándar es la fuente de la tabla `stops`
@@ -83,6 +86,55 @@ describe("normalizarStops", () => {
     );
     expect(stops).toHaveLength(1);
     expect(stops[0].nombre).toBe("Primera");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normalizarRoutes — el nombre legible es el trayecto (route_long_name)
+// ---------------------------------------------------------------------------
+
+describe("normalizarRoutes", () => {
+  it("prefiere route_long_name (nombre de display) como nombre de la línea", () => {
+    // En el GTFS de la EMT route_short_name coincide con route_id; el trayecto
+    // legible está en route_long_name.
+    const routes = normalizarRoutes(
+      parsearCsvConCabecera(
+        [
+          "route_id,route_short_name,route_long_name",
+          "1,1,Parque del Sur - Alameda Principal - San Andrés",
+        ].join("\n"),
+      ),
+    );
+    expect(routes).toEqual([
+      { codLinea: 1, nombre: "Parque del Sur - Alameda Principal - San Andrés" },
+    ]);
+  });
+
+  it("cae a route_short_name cuando falta route_long_name", () => {
+    const routes = normalizarRoutes(
+      parsearCsvConCabecera(
+        ["route_id,route_short_name,route_long_name", "C1,C1,"].join("\n"),
+      ),
+    );
+    // route_id "C1" no es entero, así que se descarta; se verifica el respaldo
+    // con un route_id entero sin long_name.
+    expect(routes).toEqual([]);
+
+    const routes2 = normalizarRoutes(
+      parsearCsvConCabecera(
+        ["route_id,route_short_name,route_long_name", "91,91,"].join("\n"),
+      ),
+    );
+    expect(routes2).toEqual([{ codLinea: 91, nombre: "91" }]);
+  });
+
+  it("descarta filas sin route_id entero", () => {
+    const routes = normalizarRoutes(
+      parsearCsvConCabecera(
+        ["route_id,route_short_name,route_long_name", ",X,Sin id"].join("\n"),
+      ),
+    );
+    expect(routes).toEqual([]);
   });
 });
 
@@ -166,5 +218,86 @@ describe("normalizarGtfs", () => {
     const dataset = normalizarGtfs(cuerposMinimos());
     expect(dataset.trips.map((t) => t.sentido)).toEqual([1, 2]);
     expect(dataset.shapes.map((s) => s.sentido).sort()).toEqual([1, 2]);
+  });
+
+  it("captura trip_headsign en los trips y deriva el Destino por (codLinea, sentido)", () => {
+    const dataset = normalizarGtfs(
+      cuerposMinimos({
+        trips: [
+          "trip_id,route_id,service_id,direction_id,shape_id,trip_headsign",
+          "T1,7,S1,0,SH1,San Andrés",
+          "T2,7,S1,1,SH2,Centro",
+        ].join("\n"),
+      }),
+    );
+    expect(dataset.trips.map((t) => t.destino)).toEqual(["San Andrés", "Centro"]);
+    expect(dataset.destinos).toEqual([
+      { codLinea: 7, sentido: 1, destino: "San Andrés" },
+      { codLinea: 7, sentido: 2, destino: "Centro" },
+    ]);
+  });
+
+  it("omite el destino del trip cuando falta trip_headsign", () => {
+    const dataset = normalizarGtfs(cuerposMinimos());
+    for (const trip of dataset.trips) {
+      expect(trip.destino).toBeUndefined();
+    }
+    expect(dataset.destinos).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// derivarDestinos — derivación determinista del Destino representativo
+// ---------------------------------------------------------------------------
+
+describe("derivarDestinos", () => {
+  it("elige el headsign más frecuente por (codLinea, sentido)", () => {
+    const trips: ViajeGtfs[] = [
+      { tripId: "A", codLinea: 7, sentido: 1, destino: "San Andrés" },
+      { tripId: "B", codLinea: 7, sentido: 1, destino: "San Andrés" },
+      { tripId: "C", codLinea: 7, sentido: 1, destino: "Alameda" },
+    ];
+    expect(derivarDestinos(trips)).toEqual([
+      { codLinea: 7, sentido: 1, destino: "San Andrés" },
+    ]);
+  });
+
+  it("resuelve empates por orden lexicográfico, de forma determinista", () => {
+    // "Alameda" y "Centro" empatan a 1; se elige el menor lexicográficamente.
+    const trips: ViajeGtfs[] = [
+      { tripId: "A", codLinea: 3, sentido: 2, destino: "Centro" },
+      { tripId: "B", codLinea: 3, sentido: 2, destino: "Alameda" },
+    ];
+    expect(derivarDestinos(trips)).toEqual([
+      { codLinea: 3, sentido: 2, destino: "Alameda" },
+    ]);
+    // El orden de llegada no altera el resultado (determinismo).
+    expect(derivarDestinos([...trips].reverse())).toEqual([
+      { codLinea: 3, sentido: 2, destino: "Alameda" },
+    ]);
+  });
+
+  it("agrupa por (codLinea, sentido) y ordena la salida de forma estable", () => {
+    const trips: ViajeGtfs[] = [
+      { tripId: "A", codLinea: 7, sentido: 2, destino: "Centro" },
+      { tripId: "B", codLinea: 7, sentido: 1, destino: "San Andrés" },
+      { tripId: "C", codLinea: 3, sentido: 1, destino: "Teatinos" },
+    ];
+    expect(derivarDestinos(trips)).toEqual([
+      { codLinea: 3, sentido: 1, destino: "Teatinos" },
+      { codLinea: 7, sentido: 1, destino: "San Andrés" },
+      { codLinea: 7, sentido: 2, destino: "Centro" },
+    ]);
+  });
+
+  it("descarta trips sin sentido o sin destino", () => {
+    const trips: ViajeGtfs[] = [
+      { tripId: "A", codLinea: 7, destino: "Sin sentido" },
+      { tripId: "B", codLinea: 7, sentido: 1 },
+      { tripId: "C", codLinea: 7, sentido: 1, destino: "Válido" },
+    ];
+    expect(derivarDestinos(trips)).toEqual([
+      { codLinea: 7, sentido: 1, destino: "Válido" },
+    ]);
   });
 });

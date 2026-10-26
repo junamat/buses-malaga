@@ -198,10 +198,10 @@ Capa de lectura sin lógica de ingesta. Todas las respuestas geográficas son Ge
 
 | Método | Ruta | Descripción | Requisitos |
 |---|---|---|---|
-| GET | `/api/buses` | Posiciones de Buses (GeoJSON), filtrable por `codLinea`, `sentido`; paginado | 2, 3, 11.1, 11.3, 11.5 |
+| GET | `/api/buses` | Posiciones de Buses (GeoJSON), filtrable por `codLinea`, `sentido`; paginado; cada Bus incluye `destino` heredado de su `(codLinea, sentido)` cuando existe | 2, 3, 11.1, 11.3, 11.5, 11.10 |
 | GET | `/api/paradas` | Paradas (GeoJSON); paginado; filtro por `codLinea` | 2, 11.1, 11.3, 11.5 |
 | GET | `/api/paradas/cercanas?lat=&lon=` | Hasta 10 paradas en radio 1000 m, ordenadas por distancia, con distancia en metros | 6.2, 6.6 |
-| GET | `/api/lineas` | Lineas; paginado | 11.1, 11.3 |
+| GET | `/api/lineas` | Lineas; paginado; incluye `destino` por `(codLinea, sentido)` cuando existe | 11.1, 11.3, 11.10 |
 | GET | `/api/paradas/{codParada}/eta` | ETA del siguiente Bus por Linea en la parada | 4, 11.2, 11.6 |
 | GET | `/api/buses/{codBus}/aportaciones` | Aportaciones vigentes del vehículo | 9.3 |
 | POST | `/api/buses/{codBus}/aportaciones` | Crear aportación (requiere sesión) | 9.1, 9.4, 9.5 |
@@ -227,7 +227,7 @@ El Servicio_Ingesta queda detrás del puerto **`IngestScheduler`**. La **funció
 Los cuatro ciclos de ingesta (idénticos en ambos adaptadores):
 
 - **Job posiciones (cada 60 s).** `pg_net` solicita `lineasyubicaciones.csv` con timeout de 30 s; normaliza coordenadas a numérico `[lon, lat]`; inserta en `bus_positions`. Ante timeout/error, registra el fallo con la fuente afectada y conserva los datos previos (Requisitos 12.1, 12.3, 12.4, 12.5).
-- **Job GTFS (cada 24 h).** Recarga `routes.csv`, `trips.csv`, `stop_times.csv`, `shapes.csv`, `calendar_dates.csv` y los nombres legibles de `lineasyparadas.geojson`; reconstruye la geometría PostGIS de `shapes` (Requisito 12.2).
+- **Job GTFS (cada 24 h).** Recarga `routes.csv`, `trips.csv`, `stop_times.csv`, `shapes.csv`, `calendar_dates.csv`; reconstruye la geometría PostGIS de `shapes`. El nombre legible de la línea se toma de `routes.route_long_name` (el trayecto de display; `route_short_name` coincide con `route_id` en el GTFS de la EMT). El **Destino** por `(route_id, sentido)` se deriva del `trip_headsign` de `trips.csv`: se agrega el headsign representativo (el más frecuente) de los trips de cada `(route_id, direction_id)` y se persiste en `route_directions` (Requisito 12.2).
 - **Job purga (cada 60 s).** Elimina posiciones crudas con antigüedad > 21600 s (ventana de retención) y libera espacio (Requisito 12.6).
 - **Job calibración (intervalo de muestreo).** Scrapea `informacionParada.html?codParada=XXX`, filtra valores fuera de [0, 120] min registrando el descarte, y almacena los `Minutos_Oficiales` para el ajuste del modelo (Requisito 5.1, 5.2).
 
@@ -277,6 +277,7 @@ Existe una sola implementación del repositorio sobre un driver de Postgres est�
 ```mermaid
 erDiagram
     routes ||--o{ trips : "route_id"
+    routes ||--o{ route_directions : "route_id"
     trips ||--o{ stop_times : "trip_id"
     stops ||--o{ stop_times : "stop_id"
     routes ||--o| shapes : "shape (por línea)"
@@ -285,8 +286,9 @@ erDiagram
     auth_users ||--o{ favorites : "user_id"
     auth_users ||--o{ vehicle_contributions : "user_id"
 
-    routes { bigint route_id PK }
-    trips { text trip_id PK  bigint route_id FK }
+    routes { bigint route_id PK  text nombre }
+    route_directions { bigint route_id FK  int sentido  text destino }
+    trips { text trip_id PK  bigint route_id FK  int sentido }
     stop_times { text trip_id FK  text stop_id FK  int stop_sequence }
     stops { text cod_parada PK  text nombre  float8 lon  float8 lat }
     shapes { bigint route_id  int sentido  geometry geom_linestring }
@@ -301,7 +303,8 @@ erDiagram
 
 ### Tablas estáticas (GTFS + nombres legibles), recarga diaria
 
-- `routes` — líneas; `route_id` (= `codLinea`) como clave de join universal.
+- `routes` — líneas; `route_id` (= `codLinea`) como clave de join universal; `nombre` legible (de `route_long_name`).
+- `route_directions` — Destino legible por `(route_id, sentido)`: `route_id`, `sentido` (1/2), `destino` (headsign representativo del GTFS). Unicidad por `(route_id, sentido)`. Recargada en el job GTFS.
 - `trips` — servicios; `trip_id`, `route_id`, `sentido`.
 - `stop_times` — orden de paradas por trip (`stop_sequence`), para derivar el recorrido ordenado y las líneas que sirven cada parada.
 - `stops` — paradas con `cod_parada`, `nombre` legible (reforzado desde `lineasyparadas.geojson`), `lon`, `lat`.
@@ -325,7 +328,7 @@ erDiagram
 
 ### Modelo de salida: GeoJSON canónico
 
-Las respuestas geográficas son `FeatureCollection` con `geometry.coordinates` numéricas en orden `[lon, lat]`. Un Bus se expone como `Feature` con propiedades `codBus`, `codLinea`, `sentido`, `last_update`, `captured_at` y un indicador de obsolescencia derivado de la antigüedad de la captura.
+Las respuestas geográficas son `FeatureCollection` con `geometry.coordinates` numéricas en orden `[lon, lat]`. Un Bus se expone como `Feature` con propiedades `codBus`, `codLinea`, `sentido`, `last_update`, `captured_at`, un indicador de obsolescencia derivado de la antigüedad de la captura y, cuando existe para su `(codLinea, sentido)`, un `destino` legible (heredado de `route_directions`; se omite la propiedad si no hay Destino). Una Linea se expone con `codLinea`, `nombre` y, por cada Sentido con Destino conocido, el `sentido` y su `destino`.
 
 ## Correctness Properties
 
@@ -572,6 +575,12 @@ Estas propiedades cubren la **capa de lógica pura** del sistema (filtrado, esti
 *Para todo* conjunto de posiciones crudas y *todo* instante de ejecución de la purga, tras la purga no queda ninguna posición con antigüedad superior a 21600 segundos y permanece toda posición dentro de la ventana.
 
 **Validates: Requirements 12.6**
+
+### Property 41: Herencia del Destino por `(Linea, Sentido)`
+
+*Para todo* Bus y *todo* mapa de Destinos por `(codLinea, sentido)`, el Destino expuesto del Bus es exactamente el del mapa para su `(codLinea, sentido)` cuando ese par tiene Destino, y la propiedad se omite cuando no lo tiene. La derivación del Destino representativo a partir de los headsign de los trips es determinista: para un multiconjunto de headsign dado, elige siempre el mismo (el más frecuente; empate resuelto por orden lexicográfico).
+
+**Validates: Requirements 2.8, 11.10**
 
 ## Error Handling
 
