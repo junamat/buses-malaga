@@ -29,6 +29,10 @@ import {
   ORDEN_BORRADO_GTFS,
   buildListParadasSql,
   buildFindParadasCercanasSql,
+  buildFindParadaSql,
+  buildEtaObservacionesSql,
+  buildInsertMinutosOficialesSql,
+  mapObservacionBus,
   buildListBusesSql,
   VENTANA_SERVICIO_SEGUNDOS,
   buildInsertPosicionesSql,
@@ -641,5 +645,136 @@ describe("PostgresRepository", () => {
     const aportaciones = await repo.listAportacionesVigentes(900);
     expect(aportaciones).toHaveLength(1);
     expect(aportaciones[0].codBus).toBe(900);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ETA, parada por código y minutos oficiales (Hito 2)
+// ---------------------------------------------------------------------------
+
+describe("buildFindParadaSql", () => {
+  it("consulta una parada por cod_parada", () => {
+    const sql = buildFindParadaSql("590");
+    expect(sql.text).toContain("FROM stops");
+    expect(sql.text).toContain("WHERE cod_parada = $1");
+    expect(sql.params).toEqual(["590"]);
+  });
+});
+
+describe("buildEtaObservacionesSql", () => {
+  it("parametriza codParada, ventana de servicio y umbral de obsolescencia", () => {
+    const sql = buildEtaObservacionesSql("590");
+    expect(sql.params[0]).toBe("590");
+    expect(sql.params[1]).toBe(VENTANA_SERVICIO_SEGUNDOS);
+    // El tercer parámetro es el umbral de obsolescencia (120 s).
+    expect(sql.params[2]).toBe(120);
+  });
+
+  it("usa map-matching PostGIS y NO lee official_minutes (Property 16)", () => {
+    const sql = buildEtaObservacionesSql("590");
+    expect(sql.text).toContain("ST_LineLocatePoint");
+    expect(sql.text).toContain("ST_LineSubstring");
+    expect(sql.text.toLowerCase()).not.toContain("official_minutes");
+  });
+});
+
+describe("mapObservacionBus", () => {
+  it("convierte una fila del map-matching a ObservacionBus", () => {
+    const obs = mapObservacionBus({
+      cod_linea: "7",
+      sentido: "1",
+      distancia_metros: "1200.5",
+      velocidad_ms: "8.3",
+      antiguedad_segundos: "45",
+    });
+    expect(obs).toEqual({
+      codLinea: 7,
+      sentido: 1,
+      distanciaMetros: 1200.5,
+      velocidadMetrosSegundo: 8.3,
+      antiguedadSegundos: 45,
+    });
+  });
+});
+
+describe("buildInsertMinutosOficialesSql", () => {
+  it("devuelve null si no hay valores", () => {
+    expect(buildInsertMinutosOficialesSql([])).toBeNull();
+  });
+
+  it("inserta en official_minutes vía unnest con arrays columnares", () => {
+    const sql = buildInsertMinutosOficialesSql([
+      { codParada: "590", codLinea: 7, minutos: 5 },
+      { codParada: "591", codLinea: 11, minutos: 12 },
+    ]);
+    expect(sql).not.toBeNull();
+    expect(sql?.text).toContain("INSERT INTO official_minutes");
+    expect(sql?.text).toContain("unnest");
+    expect(sql?.params[0]).toEqual(["590", "591"]);
+    expect(sql?.params[1]).toEqual([7, 11]);
+    expect(sql?.params[2]).toEqual([5, 12]);
+  });
+});
+
+describe("PostgresRepository — métodos de ETA/calibración", () => {
+  it("findParada devuelve la parada o null", async () => {
+    const { client: c1 } = fakeClient([
+      { cod_parada: "590", nombre: "P590", lon: -4.42, lat: 36.72 },
+    ]);
+    const repo1 = new PostgresRepository(c1);
+    expect(await repo1.findParada("590")).toEqual({
+      codParada: "590",
+      nombre: "P590",
+      lon: -4.42,
+      lat: 36.72,
+    });
+
+    const { client: c2 } = fakeClient([]);
+    const repo2 = new PostgresRepository(c2);
+    expect(await repo2.findParada("000")).toBeNull();
+  });
+
+  it("etaPorParada aplica la lógica pura de selección sobre las observaciones", async () => {
+    // Dos buses de la línea 7/sentido 1: uno cercano (ETA ~2 min) y otro lejano.
+    const { client } = fakeClient([
+      {
+        cod_linea: 7,
+        sentido: 1,
+        distancia_metros: 1000, // 1000 m a 10 m/s ≈ 100 s ≈ 2 min
+        velocidad_ms: 10,
+        antiguedad_segundos: 10,
+      },
+      {
+        cod_linea: 7,
+        sentido: 1,
+        distancia_metros: 6000, // más lejos ⇒ ETA mayor
+        velocidad_ms: 10,
+        antiguedad_segundos: 10,
+      },
+    ]);
+    const repo = new PostgresRepository(client);
+    const etas = await repo.etaPorParada("590");
+    expect(etas).toHaveLength(1);
+    expect(etas[0].codLinea).toBe(7);
+    expect(etas[0].disponible).toBe(true);
+    // Se expone el mínimo de los dos (el bus cercano).
+    expect(etas[0].minutos).toBe(2);
+  });
+
+  it("insertMinutosOficiales no emite SQL si no hay valores", async () => {
+    const { client, calls } = fakeClient();
+    const repo = new PostgresRepository(client);
+    await repo.insertMinutosOficiales([]);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("insertMinutosOficiales emite el INSERT cuando hay valores", async () => {
+    const { client, calls } = fakeClient();
+    const repo = new PostgresRepository(client);
+    await repo.insertMinutosOficiales([
+      { codParada: "590", codLinea: 7, minutos: 5 },
+    ]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].text).toContain("INSERT INTO official_minutes");
   });
 });

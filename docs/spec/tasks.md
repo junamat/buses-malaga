@@ -168,23 +168,23 @@ Las tareas se agrupan en cuatro hitos de entrega más una sección de fase 2. Ca
 
 **Objetivo de producto:** al terminar este hito el usuario conoce el ETA del siguiente bus por parada (estimación de mejor esfuerzo con margen ±1 min), ve las paradas más cercanas por geolocalización y el modelo se calibra offline con los minutos oficiales. El esquema de calibración/observabilidad ya existe desde el Hito 1 (tarea 1.5).
 
-- [ ] 6. Lógica pura de paginación, geometría y distancia
-  - [~] 6.1 Implementar paginación por cursor
+- [x] 6. Lógica pura de paginación, geometría y distancia
+  - [x] 6.1 Implementar paginación por cursor
     - Escribir `lib/pagination.ts`: partir un conjunto en páginas de como máximo 200 elementos, emitir cursor `next`, y garantizar que la unión de páginas recorridas reconstruye el conjunto sin duplicados ni omisiones.
     - _Requisitos: 11.3_
 
-  - [~] 6.2 Implementar cálculo de distancia para paradas cercanas
+  - [x] 6.2 Implementar cálculo de distancia para paradas cercanas
     - Escribir en `lib/geometry.ts` el cálculo de distancia en metros entre ubicación de usuario y parada, y la selección de hasta 10 paradas dentro de 1000 m ordenadas por distancia ascendente.
     - _Requisitos: 6.2, 6.6_
 
-  - [ ]* 6.3 Escribir property tests de paginación y distancia de paradas cercanas
+  - [x]* 6.3 Escribir property tests de paginación y distancia de paradas cercanas
     - **Property 32: La paginación particiona el conjunto completo**
     - **Property 17: Paradas cercanas: radio, límite y orden**
     - **Property 18: La distancia mostrada coincide con la calculada**
     - **Validates: Requirements 11.3, 6.2, 6.6**
 
-- [ ] 7. Servicio de ingesta: purga de posiciones crudas
-  - [~] 7.1 Implementar el job de purga (60 s, retención 6 h) invocable desde node-worker
+- [x] 7. Servicio de ingesta: purga de posiciones crudas
+  - [x] 7.1 Implementar el job de purga (60 s, retención 6 h) invocable desde node-worker
     - Añadir a la ingesta compartida la purga que elimina posiciones de `bus_positions` con antigüedad superior a 21600 s y libera espacio, disparable por el adaptador `node-worker` en local (el schedule `pg_cron` de purga se completa en el Hito 4).
     - _Requisitos: 12.6_
 
@@ -195,32 +195,32 @@ Las tareas se agrupan en cuatro hitos de entrega más una sección de fase 2. Ca
     - **Validates: Requirements 12.4, 12.5, 12.6**
     - El adaptador `node-worker` facilita estos tests: la función de ingesta se invoca directamente desde Node (sin `pg_cron`/`pg_net`) contra Postgres local, con el `fetch` a las fuentes mockeado, cubriendo la misma lógica que corre en producción.
 
-- [ ] 8. Servicio de calibración (muestreo básico)
-  - [~] 8.1 Implementar parser de minutos oficiales
+- [x] 8. Servicio de calibración (muestreo básico)
+  - [x] 8.1 Implementar parser de minutos oficiales
     - Escribir `lib/calibration.ts`: parsear el HTML de `informacionParada.html` extrayendo `<span class="minutosN">N min.</span>` por línea; descartar valores fuera de [0, 120] min (p. ej. el centinela 785) devolviendo los descartes para su registro.
     - _Requisitos: 5.1, 5.2_
 
-  - [~] 8.2 Implementar job de calibración por scraping
+  - [x] 8.2 Implementar job de calibración por scraping
     - Escribir la función de calibración (vía `node-worker` en local, `pg_net` en cloud) que muestree `informacionParada.html?codParada=XXX`, filtre con la lógica anterior, registre los descartes y almacene los valores válidos en `official_minutes`; si la web no está disponible, omitir el ciclo sin alterar el ETA de producción.
     - _Requisitos: 5.1, 5.2, 5.5_
 
-  - [ ]* 8.3 Escribir property test del filtrado de valores oficiales y test de ejemplo del parser
+  - [x]* 8.3 Escribir property test del filtrado de valores oficiales y test de ejemplo del parser
     - **Property 15: Los valores oficiales fuera de rango se descartan y registran**
     - **Validates: Requirements 5.2**
     - Añadir test de ejemplo del parser sobre HTML de muestra incluyendo el centinela 785.
     - _Requisitos: 5.1_
 
-- [ ] 9. Estimador_ETA con map-matching PostGIS
-  - [~] 9.1 Implementar lógica pura de conversión distancia→tiempo y selección de ETA
+- [x] 9. Estimador_ETA con map-matching PostGIS
+  - [x] 9.1 Implementar lógica pura de conversión distancia→tiempo y selección de ETA
     - Escribir `lib/eta.ts`: convertir distancia a lo largo del recorrido y velocidad estimada en ETA no negativo y monótono en la distancia; expresar el ETA en minutos enteros; seleccionar por línea el ETA mínimo considerando solo buses con ETA ≤ 60 min; marcar "ETA no disponible" cuando la posición más reciente supera 120 s; señalar el margen de ±1 min.
     - _Requisitos: 4.1, 4.2, 4.4, 4.6, 4.7_
 
-  - [~] 9.2 Implementar funciones SQL/PostGIS de map-matching
+  - [x] 9.2 Implementar funciones SQL/PostGIS de map-matching
     - Escribir funciones SQL que proyecten la posición más reciente de cada bus sobre el `shape` (`ST_LineLocatePoint` / `ST_LineSubstring`), calculen la distancia a lo largo del recorrido entre bus y parada, infieran velocidad de capturas consecutivas por `last_update`, y devuelvan el conjunto de ETA por línea para una parada aplicando la lógica de `lib/eta.ts`.
     - Garantizar que la salida de producción nunca incluye `official_minutes`.
     - _Requisitos: 4.1, 4.2, 5.4_
 
-  - [ ]* 9.3 Escribir property tests del estimador de ETA
+  - [x]* 9.3 Escribir property tests del estimador de ETA
     - **Property 11: Selección del ETA mínimo con cota de 60 minutos**
     - **Property 12: El ETA es no negativo y monótono en la distancia**
     - **Property 13: El ETA se expresa en minutos enteros**
@@ -232,32 +232,32 @@ Las tareas se agrupan en cuatro hitos de entrega más una sección de fase 2. Ca
     - Verificar proyección sobre LINESTRING y cálculo de distancia a lo largo del recorrido con geometrías conocidas.
     - _Requisitos: 4.2_
 
-- [ ] 10. Endpoint de ETA, paradas cercanas y visualización en el cliente
-  - [~] 10.1 Implementar endpoint de ETA
+- [x] 10. Endpoint de ETA, paradas cercanas y visualización en el cliente
+  - [x] 10.1 Implementar endpoint de ETA
     - Implementar `GET /api/paradas/{codParada}/eta` invocando el `Estimador_ETA`; responder `200` con `{eta: null, disponible: false, motivo}` cuando no hay ETA disponible, de forma coherente con el estimador.
     - _Requisitos: 4.1, 11.2, 11.6_
 
-  - [~] 10.2 Implementar endpoint de paradas cercanas
+  - [x] 10.2 Implementar endpoint de paradas cercanas
     - Implementar `GET /api/paradas/cercanas` (hasta 10 paradas en 1000 m ordenadas por distancia con distancia en metros).
     - _Requisitos: 6.2, 6.6_
 
-  - [~] 10.3 Implementar geolocalización de paradas cercanas en el cliente
+  - [x] 10.3 Implementar geolocalización de paradas cercanas en el cliente
     - Pedir permiso, gestionar concesión/denegación/timeout de 10 s y ausencia de paradas en 1000 m, mostrando la distancia en metros vía `GET /api/paradas/cercanas`.
     - _Requisitos: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6_
 
-  - [~] 10.4 Implementar visualización de ETA en el cliente
+  - [x] 10.4 Implementar visualización de ETA en el cliente
     - Mostrar el ETA marcándolo como estimación de mejor esfuerzo con margen ±1 min, consumiendo `GET /api/paradas/{codParada}/eta`.
     - _Requisitos: 4.5, 4.7_
 
-  - [ ]* 10.5 Escribir property tests del contrato HTTP de ETA
+  - [x]* 10.5 Escribir property tests del contrato HTTP de ETA
     - **Property 34: ETA inexistente responde con éxito e indicador de no disponible**
     - **Validates: Requirements 11.6**
 
-  - [ ]* 10.6 Escribir test de interacción del timeout de geolocalización
+  - [x]* 10.6 Escribir test de interacción del timeout de geolocalización
     - Timeout de geolocalización a 10 s (6.5).
     - _Requisitos: 6.5_
 
-- [~] 11. Checkpoint Hito 2 - Estimación de llegada
+- [x] 11. Checkpoint Hito 2 - Estimación de llegada
   - Ejecutar todos los tests de los hitos 1 y 2, asegurar que pasan; preguntar al usuario si surgen dudas.
 
 ### Hito 3 — "Funciones de usuario"

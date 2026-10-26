@@ -27,8 +27,10 @@
 
 import type {
   BusFeatureProperties,
+  Eta,
   LineaFeatureProperties,
   ParadaFeatureProperties,
+  ParadaCercanaFeatureProperties,
   GeoJSONFeature,
   GeoJSONFeatureCollection,
   GeoJSONGeometry,
@@ -183,6 +185,92 @@ export async function fetchLineasFeatures(
     new URLSearchParams(),
     signal,
   );
+}
+
+/** Feature canónico de una parada cercana (`Point` + distancia en metros). */
+export type ParadaCercanaFeature = GeoJSONFeature<
+  ParadaCercanaFeatureProperties,
+  GeoJSONPoint
+>;
+
+/**
+ * Obtiene las paradas cercanas a una ubicación desde `GET /api/paradas/cercanas`
+ * (hasta 10 paradas en 1000 m, ordenadas por distancia ascendente; Requisitos
+ * 6.2, 6.6). La API no pagina este endpoint (el resultado está acotado a 10),
+ * por lo que se consume en una sola petición.
+ *
+ * @param lat Latitud del usuario.
+ * @param lon Longitud del usuario.
+ */
+export async function fetchParadasCercanas(
+  lat: number,
+  lon: number,
+  signal?: AbortSignal,
+): Promise<ParadaCercanaFeature[]> {
+  const params = new URLSearchParams({ lat: String(lat), lon: String(lon) });
+  const respuesta = await fetch(`/api/paradas/cercanas?${params.toString()}`, {
+    signal,
+    headers: { Accept: "application/json" },
+  });
+  if (!respuesta.ok) {
+    throw new Error(
+      `La petición de paradas cercanas falló con estado ${respuesta.status}.`,
+    );
+  }
+  const cuerpo = (await respuesta.json()) as GeoJSONFeatureCollection<
+    ParadaCercanaFeatureProperties,
+    GeoJSONPoint
+  >;
+  return cuerpo.features;
+}
+
+/** Respuesta del endpoint de ETA: la parada y sus estimaciones por línea. */
+export interface EtaRespuesta {
+  codParada: string;
+  etas: Eta[];
+}
+
+/**
+ * Obtiene la estimación de llegada de una parada desde
+ * `GET /api/paradas/{codParada}/eta` (Requisito 4.1). Una parada inexistente
+ * (404) se propaga como error; una parada sin ETA disponible devuelve
+ * `etas` con entradas `disponible: false` (Requisito 11.6).
+ */
+export async function fetchEta(
+  codParada: string,
+  signal?: AbortSignal,
+): Promise<EtaRespuesta> {
+  const respuesta = await fetch(
+    `/api/paradas/${encodeURIComponent(codParada)}/eta`,
+    { signal, headers: { Accept: "application/json" } },
+  );
+  if (!respuesta.ok) {
+    throw new Error(
+      `La petición de ETA de la parada ${codParada} falló con estado ${respuesta.status}.`,
+    );
+  }
+  return (await respuesta.json()) as EtaRespuesta;
+}
+
+// ---------------------------------------------------------------------------
+// Lógica pura de presentación de ETA y geolocalización (Requisitos 4.5, 4.7, 6.x)
+// ---------------------------------------------------------------------------
+
+/** Timeout de la geolocalización del navegador, en ms (Requisito 6.5). */
+export const GEOLOCALIZACION_TIMEOUT_MS = 10_000;
+
+/**
+ * Formatea una estimación de llegada como texto legible, marcándola siempre como
+ * estimación de mejor esfuerzo con margen ±1 min cuando está disponible
+ * (Requisitos 4.5, 4.7). Cuando no hay estimación, devuelve el motivo
+ * (Requisito 11.6).
+ */
+export function formatEta(eta: Eta): string {
+  if (!eta.disponible || eta.minutos === null) {
+    return eta.motivo ?? "ETA no disponible.";
+  }
+  const margen = eta.margenMinutos ?? 1;
+  return `~${eta.minutos} min (±${margen}, estimación de mejor esfuerzo)`;
 }
 
 // ---------------------------------------------------------------------------

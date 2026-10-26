@@ -36,8 +36,10 @@ import type {
   GeoJSONFeatureCollection,
   BusFeatureProperties,
   ParadaFeatureProperties,
+  ParadaCercanaFeatureProperties,
   LineaFeatureProperties,
 } from "@/lib/types";
+import type { ParadaCercana } from "@/lib/ports";
 
 // ---------------------------------------------------------------------------
 // Destino por (codLinea, sentido)
@@ -255,6 +257,39 @@ export function featureCollectionToParadas(
   fc: GeoJSONFeatureCollection<ParadaFeatureProperties, GeoJSONPoint>,
 ): Parada[] {
   return fc.features.map(featureToParada);
+}
+
+/**
+ * Serializa una `ParadaCercana` a su `Feature` canónico, añadiendo
+ * `distanciaMetros` a las propiedades de la parada (Requisito 6.6). El orden del
+ * array de features lo fija el llamador (distancia ascendente desde el
+ * repositorio).
+ */
+export function paradaCercanaToFeature(
+  parada: ParadaCercana,
+): GeoJSONFeature<ParadaCercanaFeatureProperties, GeoJSONPoint> {
+  return {
+    type: "Feature",
+    geometry: {
+      type: "Point",
+      coordinates: [parada.lon, parada.lat],
+    },
+    properties: {
+      codParada: parada.codParada,
+      nombre: parada.nombre,
+      distanciaMetros: parada.distanciaMetros,
+    },
+  };
+}
+
+/** Serializa un conjunto de `ParadaCercana` a una `FeatureCollection` canónica. */
+export function paradasCercanasToFeatureCollection(
+  paradas: readonly ParadaCercana[],
+): GeoJSONFeatureCollection<ParadaCercanaFeatureProperties, GeoJSONPoint> {
+  return {
+    type: "FeatureCollection",
+    features: paradas.map(paradaCercanaToFeature),
+  };
 }
 
 // ---------------------------------------------------------------------------

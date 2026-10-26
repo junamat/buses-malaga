@@ -25,9 +25,13 @@
  * contrato de parsing y de errores, sin duplicar la validación en cada uno.
  */
 
-import type { CodLinea, Sentido } from "@/lib/types";
+import type { CodLinea, Sentido, Position } from "@/lib/types";
 import type { Paginacion } from "@/lib/ports";
-import { type ApiError, malformedRequest } from "@/lib/apiErrors";
+import {
+  type ApiError,
+  malformedRequest,
+  validateRequiredParams,
+} from "@/lib/apiErrors";
 
 /** Nombres canónicos de los parámetros de consulta soportados. */
 export const QUERY_PARAMS = {
@@ -35,6 +39,8 @@ export const QUERY_PARAMS = {
   sentido: "sentido",
   limite: "limite",
   cursor: "cursor",
+  lat: "lat",
+  lon: "lon",
 } as const;
 
 /** Parámetros de paginación ya parseados para pasar al `Repository`. */
@@ -163,6 +169,61 @@ export function parsePaginacion(
   }
 
   return paginacion;
+}
+
+/**
+ * Parsea un número de coma flotante estricto desde un string: acepta decimales
+ * con punto y signo, rechaza texto sobrante, `NaN` e infinitos. Tolera la coma
+ * decimal europea no se admite aquí a propósito: los query params de la API usan
+ * el punto como separador decimal. Devuelve `null` si no encaja.
+ */
+function parseFloatStrict(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!/^[+-]?(\d+\.?\d*|\.\d+)$/.test(trimmed)) {
+    return null;
+  }
+  const value = Number.parseFloat(trimmed);
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Extrae la ubicación `[lon, lat]` obligatoria del query string para los
+ * endpoints de proximidad (`/api/paradas/cercanas`). `lat` y `lon` son
+ * obligatorios (Requisito 11.9) y deben ser números finitos con rangos
+ * geográficos válidos (`lat ∈ [-90, 90]`, `lon ∈ [-180, 180]`); en otro caso se
+ * devuelve el `ApiError` correspondiente (parámetros ausentes o malformados,
+ * Requisitos 11.8, 11.9). Devuelve la `Position` canónica `[lon, lat]`.
+ */
+export function parseUbicacion(
+  params: URLSearchParams,
+): Position | ApiError {
+  const faltan = validateRequiredParams(
+    [QUERY_PARAMS.lat, QUERY_PARAMS.lon],
+    {
+      lat: params.get(QUERY_PARAMS.lat),
+      lon: params.get(QUERY_PARAMS.lon),
+    },
+  );
+  if (faltan !== null) {
+    return faltan;
+  }
+
+  const lat = parseFloatStrict(params.get(QUERY_PARAMS.lat) as string);
+  const lon = parseFloatStrict(params.get(QUERY_PARAMS.lon) as string);
+
+  if (lat === null || lon === null) {
+    return malformedRequest(
+      'Los parámetros "lat" y "lon" deben ser números (p. ej. lat=36.72&lon=-4.42).',
+    );
+  }
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+    return malformedRequest(
+      'Los parámetros "lat" y "lon" están fuera de rango ' +
+        "(lat ∈ [-90, 90], lon ∈ [-180, 180]).",
+    );
+  }
+
+  return [lon, lat];
 }
 
 /** ¿El valor devuelto por una función de parsing es un `ApiError`? */

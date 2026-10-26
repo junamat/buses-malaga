@@ -70,9 +70,16 @@ import {
   describeStaleness,
   fetchBuses,
   fetchParadas,
+  fetchEta,
+  formatEta,
   type BusFeature,
   type ParadaFeature,
+  type ParadaCercanaFeature,
 } from "./busLayerData";
+import {
+  buscarParadasCercanas,
+  type EstadoGeolocalizacion,
+} from "./geolocation";
 import {
   EMPTY_FILTER_STATE,
   clear,
@@ -82,7 +89,7 @@ import {
   type FilterState,
   type ParadaLineasLookup,
 } from "@/lib/filters";
-import type { CodLinea, Sentido } from "@/lib/types";
+import type { CodLinea, Eta, Sentido } from "@/lib/types";
 import { applyFilters } from "./applyFilters";
 import {
   fetchLineas,
@@ -299,6 +306,62 @@ function useParadaLineasLookup(
 }
 
 /**
+ * Contenido de ETA dentro del popup de una parada (Requisitos 4.1, 4.5, 4.7).
+ *
+ * Consulta `GET /api/paradas/{codParada}/eta` al montarse (cuando el usuario
+ * abre el popup) y muestra, por línea/sentido, el ETA del siguiente bus marcado
+ * como estimación de mejor esfuerzo con margen ±1 min (`formatEta`). Una parada
+ * sin ETA disponible muestra el motivo (Requisito 11.6); un fallo de red muestra
+ * un aviso sin bloquear el resto del popup.
+ */
+function ParadaEtaContent({ codParada }: { codParada: string }): JSX.Element {
+  const [estado, setEstado] = useState<
+    | { tipo: "cargando" }
+    | { tipo: "ok"; etas: Eta[] }
+    | { tipo: "error" }
+  >({ tipo: "cargando" });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setEstado({ tipo: "cargando" });
+    fetchEta(codParada, controller.signal)
+      .then((respuesta) => {
+        if (!controller.signal.aborted) {
+          setEstado({ tipo: "ok", etas: respuesta.etas });
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setEstado({ tipo: "error" });
+        }
+      });
+    return () => controller.abort();
+  }, [codParada]);
+
+  if (estado.tipo === "cargando") {
+    return <span>Calculando llegada…</span>;
+  }
+  if (estado.tipo === "error") {
+    return <span>No se pudo obtener la estimación de llegada.</span>;
+  }
+  const etas = estado.etas;
+  if (etas.length === 0) {
+    return <span>Sin líneas con estimación para esta parada.</span>;
+  }
+  return (
+    <span>
+      <strong>Próximas llegadas</strong>
+      <br />
+      {etas.map((eta) => (
+        <span key={`${eta.codLinea}-${eta.sentido}`} style={{ display: "block" }}>
+          L{eta.codLinea} · S{eta.sentido}: {formatEta(eta)}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/**
  * Capa de marcadores de Buses y Paradas sobre Leaflet (Requisitos 2.1–2.4).
  *
  * - Buses: un `CircleMarker` por posición (`[lon, lat]` → `[lat, lon]`), con un
@@ -306,7 +369,8 @@ function useParadaLineasLookup(
  *   2.2). Los buses con posición obsoleta se atenúan visualmente (Requisito
  *   2.7).
  * - Paradas: un `CircleMarker` por coordenada; al seleccionarla (click) un
- *   `Popup` muestra el `nombre` legible y el `codParada` (Requisitos 2.3, 2.4).
+ *   `Popup` muestra el `nombre` legible y el `codParada` (Requisitos 2.3, 2.4),
+ *   más la estimación de llegada por línea (Requisitos 4.1, 4.5, 4.7).
  */
 function BusStopMarkers({
   buses,
@@ -336,6 +400,8 @@ function BusStopMarkers({
               <strong>{nombre}</strong>
               <br />
               <span>Parada {codParada}</span>
+              <br />
+              <ParadaEtaContent codParada={codParada} />
             </Popup>
           </CircleMarker>
         );
@@ -372,6 +438,49 @@ function BusStopMarkers({
               </span>
               <br />
               <span>Bus {codBus}</span>
+            </Popup>
+          </CircleMarker>
+        );
+      })}
+    </>
+  );
+}
+
+/**
+ * Marcadores de las paradas cercanas obtenidas por geolocalización (Requisitos
+ * 6.2, 6.6): hasta 10 paradas en 1000 m, resaltadas y con su distancia en metros
+ * en el popup.
+ */
+function NearbyStopsMarkers({
+  paradas,
+}: {
+  paradas: readonly ParadaCercanaFeature[];
+}): JSX.Element {
+  return (
+    <>
+      {paradas.map((parada) => {
+        const [lon, lat] = parada.geometry.coordinates;
+        const { codParada, nombre, distanciaMetros } = parada.properties;
+        return (
+          <CircleMarker
+            key={`cercana-${codParada}`}
+            center={[lat, lon]}
+            radius={7}
+            pathOptions={{
+              color: "#2e7d32",
+              weight: 2,
+              fillColor: "#66bb6a",
+              fillOpacity: 0.9,
+            }}
+          >
+            <Popup>
+              <strong>{nombre}</strong>
+              <br />
+              <span>Parada {codParada}</span>
+              <br />
+              <span>A {Math.round(distanciaMetros)} m</span>
+              <br />
+              <ParadaEtaContent codParada={codParada} />
             </Popup>
           </CircleMarker>
         );
@@ -442,6 +551,33 @@ export default function MapaBase(): JSX.Element {
   const handleClearFilters = useCallback(() => {
     setFilterState(clear());
   }, []);
+
+  // --- Paradas cercanas por geolocalización (Requisito 6) ------------------
+  const [geoEstado, setGeoEstado] = useState<EstadoGeolocalizacion>({
+    tipo: "inactivo",
+  });
+
+  const handleBuscarCercanas = useCallback(() => {
+    if (
+      typeof navigator === "undefined" ||
+      navigator.geolocation === undefined
+    ) {
+      setGeoEstado({
+        tipo: "error",
+        causa: "otro",
+        motivo: "Tu navegador no admite geolocalización.",
+      });
+      return;
+    }
+    const controller = new AbortController();
+    void buscarParadasCercanas(navigator.geolocation, {
+      signal: controller.signal,
+      onProgreso: (estado) => setGeoEstado(estado),
+    }).then((estadoFinal) => setGeoEstado(estadoFinal));
+  }, []);
+
+  const paradasCercanas =
+    geoEstado.tipo === "resultado" ? geoEstado.paradas : [];
 
   // Aviso de datos obsoletos con su antigüedad (Requisito 2.7). Se recalcula en
   // cada render contra el instante actual; la lógica pura vive en busLayerData.
@@ -551,6 +687,7 @@ export default function MapaBase(): JSX.Element {
         ) : null}
         <ViewSync onPan={handlePan} onZoom={handleZoom} />
         <BusStopMarkers buses={busesVisibles} paradas={paradasVisibles} />
+        <NearbyStopsMarkers paradas={paradasCercanas} />
       </MapContainer>
 
       <FilterPanel
@@ -632,6 +769,11 @@ export default function MapaBase(): JSX.Element {
           conocidas.
         </div>
       ) : null}
+
+      <NearbyStopsControl
+        estado={geoEstado}
+        onBuscar={handleBuscarCercanas}
+      />
 
       <LayerSwitcher
         layers={state.layers}
@@ -718,6 +860,88 @@ function LayerSwitcher({
           </label>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * Control de paradas cercanas por geolocalización (Requisito 6). Un botón pide
+ * la ubicación (6.1) y, según el resultado, muestra un mensaje de estado:
+ * localizando, denegación (6.4), timeout (6.5), sin paradas en 1000 m (6.6) o el
+ * número de paradas encontradas (6.2). Las paradas se pintan en el mapa con su
+ * distancia.
+ */
+function NearbyStopsControl({
+  estado,
+  onBuscar,
+}: {
+  estado: EstadoGeolocalizacion;
+  onBuscar: () => void;
+}): JSX.Element {
+  const ocupado = estado.tipo === "localizando" || estado.tipo === "buscando";
+
+  const mensaje = ((): string | null => {
+    switch (estado.tipo) {
+      case "localizando":
+        return "Obteniendo tu ubicación…";
+      case "buscando":
+        return "Buscando paradas cercanas…";
+      case "resultado":
+        return `${estado.paradas.length} parada(s) en 1000 m, por cercanía.`;
+      case "vacio":
+        return "No hay paradas dentro de 1000 m.";
+      case "error":
+        return estado.motivo;
+      default:
+        return null;
+    }
+  })();
+
+  const esError = estado.tipo === "error";
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        bottom: 16,
+        left: 12,
+        zIndex: 1000,
+        background: "#fff",
+        borderRadius: 4,
+        padding: 8,
+        boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
+        fontSize: 14,
+        maxWidth: 260,
+        color: "#222",
+      }}
+    >
+      <button
+        type="button"
+        onClick={onBuscar}
+        disabled={ocupado}
+        style={{
+          cursor: ocupado ? "progress" : "pointer",
+          padding: "6px 10px",
+          border: "1px solid #2e7d32",
+          borderRadius: 4,
+          background: ocupado ? "#e0e0e0" : "#66bb6a",
+          color: ocupado ? "#555" : "#0b3d0b",
+          fontSize: 14,
+        }}
+      >
+        Paradas cercanas
+      </button>
+      {mensaje !== null ? (
+        <div
+          role="status"
+          style={{
+            marginTop: 6,
+            color: esError ? "#b00020" : "#333",
+          }}
+        >
+          {mensaje}
+        </div>
+      ) : null}
     </div>
   );
 }

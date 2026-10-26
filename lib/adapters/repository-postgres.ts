@@ -39,6 +39,7 @@ import type {
   ParadaCercana,
   NuevaAportacion,
   NuevoFavorito,
+  NuevoMinutoOficial,
   IngestResult,
 } from "@/lib/ports";
 import type {
@@ -46,7 +47,9 @@ import type {
   Bus,
   CodBus,
   CodLinea,
+  CodParada,
   DestinoGtfs,
+  Eta,
   ExcepcionCalendarioGtfs,
   Favorito,
   FormaGtfs,
@@ -60,6 +63,11 @@ import type {
   TipoFavorito,
   ViajeGtfs,
 } from "@/lib/types";
+import {
+  calcularEtasPorLinea,
+  UMBRAL_OBSOLETO_SEGUNDOS,
+  type ObservacionBus,
+} from "@/lib/eta";
 
 // ---------------------------------------------------------------------------
 // Constantes de paginación
@@ -185,6 +193,30 @@ export function mapParadaCercana(row: ParadaCercanaRow): ParadaCercana {
   return {
     ...mapParada(row),
     distanciaMetros: toNumber(row.distancia_metros),
+  };
+}
+
+/**
+ * Fila del map-matching de ETA: por cada bus candidato de una parada, la línea y
+ * el sentido, la distancia a lo largo del recorrido hasta la parada (m), la
+ * velocidad inferida (m/s) y la antigüedad de su última posición (s). Es la
+ * entrada de la lógica pura de `lib/eta.ts`.
+ */
+export interface ObservacionBusRow extends QueryResultRow {
+  cod_linea: number | string;
+  sentido: number | string | null;
+  distancia_metros: number | string | null;
+  velocidad_ms: number | string | null;
+  antiguedad_segundos: number | string | null;
+}
+
+export function mapObservacionBus(row: ObservacionBusRow): ObservacionBus {
+  return {
+    codLinea: toNumber(row.cod_linea),
+    sentido: toNumber(row.sentido),
+    distanciaMetros: toNumber(row.distancia_metros),
+    velocidadMetrosSegundo: toNumber(row.velocidad_ms),
+    antiguedadSegundos: toNumber(row.antiguedad_segundos),
   };
 }
 
@@ -339,6 +371,152 @@ export function buildFindParadasCercanasSql(
       ") " +
       "ORDER BY distancia_metros ASC LIMIT $4",
     params: [lon, lat, radioMetros, limite],
+  };
+}
+
+/** SQL de `findParada`: una parada por `cod_parada` (o ninguna fila). */
+export function buildFindParadaSql(codParada: CodParada): SqlStatement {
+  return {
+    text: "SELECT cod_parada, nombre, lon, lat FROM stops WHERE cod_parada = $1",
+    params: [codParada],
+  };
+}
+
+/**
+ * SQL del map-matching de ETA para una parada (tarea 9.2). Por cada bus "en
+ * servicio" (última captura por `cod_bus` dentro de la ventana de servicio) de
+ * una línea/sentido que sirve la parada, proyecta la posición del bus y la
+ * parada sobre el `shape` del `(route_id, sentido)` y calcula:
+ *
+ * - `distancia_metros`: distancia a lo largo del recorrido entre el bus y la
+ *   parada (longitud del subtramo `ST_LineSubstring` entre ambas proyecciones,
+ *   medida en `geography`). Solo cuenta si la parada va **por delante** del bus
+ *   en el sentido del recorrido (`frac_parada >= frac_bus`); si el bus ya pasó
+ *   la parada, la distancia es `NULL` y la lógica de `lib/eta.ts` lo descarta.
+ * - `velocidad_ms`: velocidad media del bus inferida de sus dos últimas capturas
+ *   (distancia geodésica entre ellas / diferencia de `last_update` en segundos).
+ *   `NULL`/0 si no hay dos capturas o no transcurrió tiempo.
+ * - `antiguedad_segundos`: antigüedad de la última posición respecto a `now()`.
+ *
+ * La selección del ETA mínimo, la cota de 60 min, el redondeo a minutos enteros
+ * y el filtro de obsolescencia los aplica la lógica pura de `lib/eta.ts` sobre
+ * estas filas, de modo que esas reglas se prueben sin base de datos. Esta
+ * consulta **no** lee `official_minutes` (Requisito 5.4, Property 16).
+ *
+ * `$1` = `cod_parada`, `$2` = ventana de servicio en segundos, `$3` = umbral de
+ * obsolescencia en segundos (los buses más antiguos ni se consideran).
+ */
+export function buildEtaObservacionesSql(codParada: CodParada): SqlStatement {
+  return {
+    text: `
+WITH parada AS (
+  SELECT cod_parada, ST_SetSRID(ST_MakePoint(lon, lat), 4326) AS geom
+  FROM stops WHERE cod_parada = $1
+),
+-- Líneas/sentidos que sirven la parada (vía trips/stop_times).
+lineas_parada AS (
+  SELECT DISTINCT t.route_id AS cod_linea, t.sentido
+  FROM stop_times st
+  JOIN trips t ON t.trip_id = st.trip_id
+  WHERE st.stop_id = $1 AND t.sentido IS NOT NULL
+),
+-- Dos últimas capturas por bus (para posición vigente y velocidad), dentro de
+-- la ventana de servicio respecto a la última ingesta.
+ultima_ingesta AS (
+  SELECT max(captured_at) AS ts FROM bus_positions
+),
+capturas AS (
+  SELECT bp.*, ROW_NUMBER() OVER (
+    PARTITION BY bp.cod_bus ORDER BY bp.last_update DESC, bp.captured_at DESC
+  ) AS rn
+  FROM bus_positions bp, ultima_ingesta ui
+  WHERE ui.ts IS NOT NULL
+    AND bp.captured_at >= ui.ts - make_interval(secs => $2)
+),
+actual AS (SELECT * FROM capturas WHERE rn = 1),
+previa AS (SELECT * FROM capturas WHERE rn = 2),
+candidatos AS (
+  SELECT
+    a.cod_bus,
+    a.cod_linea,
+    a.sentido,
+    a.lon, a.lat,
+    a.last_update,
+    EXTRACT(EPOCH FROM (now() - a.last_update)) AS antiguedad_segundos,
+    -- Velocidad media entre las dos últimas capturas (m/s).
+    CASE
+      WHEN p.cod_bus IS NULL THEN NULL
+      WHEN EXTRACT(EPOCH FROM (a.last_update - p.last_update)) <= 0 THEN NULL
+      ELSE ST_Distance(
+             ST_SetSRID(ST_MakePoint(a.lon, a.lat), 4326)::geography,
+             ST_SetSRID(ST_MakePoint(p.lon, p.lat), 4326)::geography
+           ) / EXTRACT(EPOCH FROM (a.last_update - p.last_update))
+    END AS velocidad_ms
+  FROM actual a
+  JOIN lineas_parada lp ON lp.cod_linea = a.cod_linea AND lp.sentido = a.sentido
+  LEFT JOIN previa p ON p.cod_bus = a.cod_bus
+)
+SELECT
+  c.cod_linea,
+  c.sentido,
+  c.velocidad_ms,
+  c.antiguedad_segundos,
+  -- Distancia a lo largo del recorrido entre el bus y la parada. NULL si el bus
+  -- ya rebasó la parada en el sentido del shape (la lógica pura lo descarta).
+  CASE
+    WHEN s.geom_linestring IS NULL THEN NULL
+    WHEN ST_LineLocatePoint(s.geom_linestring, pa.geom)
+         < ST_LineLocatePoint(s.geom_linestring,
+             ST_SetSRID(ST_MakePoint(c.lon, c.lat), 4326)) THEN NULL
+    ELSE ST_Length(
+           ST_LineSubstring(
+             s.geom_linestring,
+             LEAST(
+               ST_LineLocatePoint(s.geom_linestring,
+                 ST_SetSRID(ST_MakePoint(c.lon, c.lat), 4326)),
+               ST_LineLocatePoint(s.geom_linestring, pa.geom)
+             ),
+             GREATEST(
+               ST_LineLocatePoint(s.geom_linestring,
+                 ST_SetSRID(ST_MakePoint(c.lon, c.lat), 4326)),
+               ST_LineLocatePoint(s.geom_linestring, pa.geom)
+             )
+           )::geography
+         )
+  END AS distancia_metros
+FROM candidatos c
+CROSS JOIN parada pa
+LEFT JOIN shapes s ON s.route_id = c.cod_linea AND s.sentido = c.sentido
+WHERE c.antiguedad_segundos <= $3
+`,
+    params: [codParada, VENTANA_SERVICIO_SEGUNDOS, UMBRAL_OBSOLETO_SEGUNDOS],
+  };
+}
+
+/**
+ * SQL de `insertMinutosOficiales`: inserción múltiple en `official_minutes` vía
+ * `unnest`. `sampled_at` lo asigna la BD por defecto. Devuelve `null` si no hay
+ * valores que insertar. (Requisitos 5.1, 5.2)
+ */
+export function buildInsertMinutosOficialesSql(
+  minutos: NuevoMinutoOficial[],
+): SqlStatement | null {
+  if (minutos.length === 0) {
+    return null;
+  }
+  const codParada: string[] = [];
+  const codLinea: number[] = [];
+  const mins: number[] = [];
+  for (const m of minutos) {
+    codParada.push(m.codParada);
+    codLinea.push(m.codLinea);
+    mins.push(m.minutos);
+  }
+  return {
+    text:
+      "INSERT INTO official_minutes (cod_parada, cod_linea, minutos) " +
+      "SELECT * FROM unnest($1::text[], $2::bigint[], $3::integer[])",
+    params: [codParada, codLinea, mins],
   };
 }
 
@@ -888,6 +1066,22 @@ export class PostgresRepository implements Repository {
     return rows.map(mapParadaCercana);
   }
 
+  async findParada(codParada: CodParada): Promise<Parada | null> {
+    const { text, params } = buildFindParadaSql(codParada);
+    const { rows } = await this.client.query<ParadaRow>(text, params);
+    return rows.length > 0 ? mapParada(rows[0]) : null;
+  }
+
+  async etaPorParada(codParada: CodParada): Promise<Eta[]> {
+    // El map-matching PostGIS produce una observación por bus candidato; la
+    // selección del ETA mínimo por línea (cota 60 min, obsolescencia, minutos
+    // enteros, margen ±1) la aplica la lógica pura de `lib/eta.ts`, sin leer
+    // `official_minutes` (Requisito 5.4, Property 16).
+    const { text, params } = buildEtaObservacionesSql(codParada);
+    const { rows } = await this.client.query<ObservacionBusRow>(text, params);
+    return calcularEtasPorLinea(rows.map(mapObservacionBus));
+  }
+
   async listBuses(
     filtro?: FiltroPosiciones,
     pagina?: Paginacion,
@@ -989,6 +1183,14 @@ export class PostgresRepository implements Repository {
   async logIngesta(result: IngestResult): Promise<void> {
     const { text, params } = buildLogIngestaSql(result);
     await this.client.query(text, params);
+  }
+
+  async insertMinutosOficiales(minutos: NuevoMinutoOficial[]): Promise<void> {
+    const statement = buildInsertMinutosOficialesSql(minutos);
+    if (statement === null) {
+      return;
+    }
+    await this.client.query(statement.text, statement.params);
   }
 }
 

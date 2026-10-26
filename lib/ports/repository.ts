@@ -24,6 +24,7 @@ import type {
   CodLinea,
   CodParada,
   DestinoGtfs,
+  Eta,
   Favorito,
   Aportacion,
   GtfsDataset,
@@ -84,6 +85,19 @@ export interface NuevoFavorito {
 }
 
 /**
+ * Minuto oficial muestreado por el Servicio_Calibracion para una parada/línea.
+ * Es dato de calibración offline: se almacena en `official_minutes` y **nunca**
+ * forma parte de las respuestas de producción (Requisito 5.4, Property 16). El
+ * `id` y el `sampled_at` los asigna la implementación.
+ */
+export interface NuevoMinutoOficial {
+  codParada: CodParada;
+  codLinea: CodLinea;
+  /** Minutos oficiales ya filtrados al rango válido `[0, 120]` (Requisito 5.2). */
+  minutos: number;
+}
+
+/**
  * Repositorio de datos del modelo interno. Todas las coordenadas se manejan en
  * orden `[lon, lat]` numérico, coherente con el GeoJSON canónico de salida.
  */
@@ -121,6 +135,14 @@ export interface Repository {
     limite: number,
   ): Promise<ParadaCercana[]>;
 
+  /**
+   * Devuelve la Parada con el `codParada` dado, o `null` si no existe. Lo usa el
+   * endpoint de ETA para distinguir "parada inexistente" (404, Requisito 11.7)
+   * de "parada existente sin ETA disponible" (200 con `disponible: false`,
+   * Requisito 11.6).
+   */
+  findParada(codParada: CodParada): Promise<Parada | null>;
+
   // --- Posiciones de buses -------------------------------------------------
 
   /**
@@ -131,6 +153,26 @@ export interface Repository {
     filtro?: FiltroPosiciones,
     pagina?: Paginacion,
   ): Promise<Pagina<Bus>>;
+
+  // --- Estimación de llegada (ETA) ----------------------------------------
+
+  /**
+   * Estimación de llegada del siguiente bus por línea/sentido a la parada dada.
+   *
+   * Ejecuta el map-matching PostGIS (proyección de la última posición de cada
+   * bus sobre el `shape` con `ST_LineLocatePoint`/`ST_LineSubstring`, distancia
+   * a lo largo del recorrido entre bus y parada, velocidad inferida de capturas
+   * consecutivas por `last_update`) y aplica la lógica pura de selección de
+   * `lib/eta.ts`: ETA mínimo por línea con cota de 60 min, "no disponible" si la
+   * posición más reciente supera 120 s, minutos enteros y margen ±1 min
+   * (Requisitos 4.1, 4.2, 4.4, 4.6, 4.7).
+   *
+   * La salida **nunca** incluye los minutos oficiales de `official_minutes`
+   * (Requisito 5.4, Property 16). Un `codParada` sin líneas/posiciones vigentes
+   * devuelve un conjunto vacío o entradas con `disponible: false`, nunca un
+   * error (el "no encontrado" lo decide la existencia de la parada en la API).
+   */
+  etaPorParada(codParada: CodParada): Promise<Eta[]>;
 
   // --- Recarga de datos estáticos GTFS (cada 24 h) ------------------------
 
@@ -172,6 +214,17 @@ export interface Repository {
    * forma que enmascare el resultado del ciclo: el llamador lo aísla.
    */
   logIngesta(result: IngestResult): Promise<void>;
+
+  // --- Calibración (minutos oficiales, offline) ---------------------------
+
+  /**
+   * Persiste minutos oficiales muestreados por el Servicio_Calibracion en
+   * `official_minutes` (Requisitos 5.1, 5.2). Datos de calibración offline,
+   * excluidos de las respuestas de producción (Requisito 5.4, Property 16). Lo
+   * invoca el ciclo de calibración (tarea 8.2) con los valores ya filtrados al
+   * rango válido por `lib/calibration.ts`. Un conjunto vacío no hace nada.
+   */
+  insertMinutosOficiales(minutos: NuevoMinutoOficial[]): Promise<void>;
 
   // --- Favoritos y aportaciones -------------------------------------------
 

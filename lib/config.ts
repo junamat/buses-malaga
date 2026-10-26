@@ -29,6 +29,7 @@ import {
 } from "@/lib/adapters/ingest-node-worker";
 import type { IngestConfig } from "@/lib/ingest";
 import { recargarGtfs } from "@/lib/gtfs";
+import { cicloCalibracion } from "@/lib/calibrationCycle";
 
 // ---------------------------------------------------------------------------
 // Modo de backend
@@ -290,9 +291,9 @@ export function createIngestScheduler(
 /**
  * Construye la `IngestConfig` del modo `local-postgres` a partir de la config
  * resuelta: la fuente de posiciones (URL del CSV), la ventana de purga por
- * defecto y la recarga GTFS compartida de `lib/gtfs.ts`. La calibración (tarea
- * 8.2) se deja sin conectar; el dispatcher devuelve un fallo explicativo si se
- * invoca ese ciclo, y el worker no programa su temporizador.
+ * defecto, la recarga GTFS compartida de `lib/gtfs.ts` y el ciclo de calibración
+ * de `lib/calibrationCycle.ts` (tarea 8.2). Con la calibración conectada, el
+ * worker `node-worker` programa su temporizador de muestreo.
  */
 export function buildLocalIngestConfig(config: BackendConfig): IngestConfig {
   const posicionesFuenteUrl =
@@ -300,6 +301,7 @@ export function buildLocalIngestConfig(config: BackendConfig): IngestConfig {
   return {
     posiciones: { fuenteUrl: posicionesFuenteUrl },
     recargaGtfs: recargarGtfs,
+    calibracion: cicloCalibracion,
   };
 }
 

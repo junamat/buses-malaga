@@ -15,6 +15,7 @@ export type {
   ParadaCercana,
   NuevaAportacion,
   NuevoFavorito,
+  NuevoMinutoOficial,
 } from "./repository";
 
 export type {

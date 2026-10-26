@@ -223,6 +223,40 @@ export interface Aportacion {
 }
 
 // ---------------------------------------------------------------------------
+// Estimación de llegada (ETA)
+// ---------------------------------------------------------------------------
+
+/**
+ * Estimación de llegada del siguiente bus de una línea a una parada, por línea
+ * y sentido. Es el resultado del `Estimador_ETA` (lógica pura en `lib/eta.ts`
+ * sobre el map-matching PostGIS). El ETA es una estimación de mejor esfuerzo con
+ * un margen de ±1 minuto (Requisitos 4.1, 4.4, 4.5, 4.7).
+ */
+export interface Eta {
+  codLinea: CodLinea;
+  sentido: Sentido;
+  /**
+   * Minutos enteros no negativos hasta la llegada estimada cuando
+   * `disponible` es `true`; `null` cuando no hay estimación disponible
+   * (Requisitos 4.3, 4.6).
+   */
+  minutos: number | null;
+  /** Indica si hay una estimación disponible para esta línea/sentido. */
+  disponible: boolean;
+  /**
+   * Margen de confianza en minutos de la estimación (±). Fijo en 1 min por el
+   * diseño cuando hay estimación; se omite cuando no la hay (Requisito 4.7).
+   */
+  margenMinutos?: number;
+  /**
+   * Motivo por el que no hay estimación, cuando `disponible` es `false` (p. ej.
+   * posición obsoleta o ningún bus dentro de la cota de 60 min). Presente solo
+   * en el caso no disponible (Requisito 11.6).
+   */
+  motivo?: string;
+}
+
+// ---------------------------------------------------------------------------
 // GeoJSON canónico de salida
 // ---------------------------------------------------------------------------
 
@@ -297,6 +331,14 @@ export interface BusFeatureProperties {
 export interface ParadaFeatureProperties {
   codParada: CodParada;
   nombre: string;
+}
+
+/**
+ * Propiedades del Feature de una parada cercana: las de una parada más la
+ * distancia en metros al punto del usuario (Requisito 6.6).
+ */
+export interface ParadaCercanaFeatureProperties extends ParadaFeatureProperties {
+  distanciaMetros: number;
 }
 
 /** Propiedades del Feature de una Linea en el GeoJSON canónico. */
