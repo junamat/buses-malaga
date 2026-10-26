@@ -1,0 +1,498 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "1.1 Crear el proyecto Next.js, el runner de tests y la configuración base": [
+      {
+        "executionId": "a8938e34-f918-43a9-86c4-b84a4620e355",
+        "chatSessionId": "sess_da0b8015-8d81-4046-977e-b1a180273bff",
+        "timestamp": 1792929913812
+      },
+      {
+        "executionId": "a8938e34-f918-43a9-86c4-b84a4620e355",
+        "chatSessionId": "sess_da0b8015-8d81-4046-977e-b1a180273bff",
+        "timestamp": 1792930352010
+      }
+    ],
+    "1.2 Definir las interfaces de puertos y el selector de backend por entorno": [
+      {
+        "executionId": "a8938e34-f918-43a9-86c4-b84a4620e355",
+        "chatSessionId": "sess_da0b8015-8d81-4046-977e-b1a180273bff",
+        "timestamp": 1792930355008
+      },
+      {
+        "executionId": "a8938e34-f918-43a9-86c4-b84a4620e355",
+        "chatSessionId": "sess_da0b8015-8d81-4046-977e-b1a180273bff",
+        "timestamp": 1792930581830
+      }
+    ],
+    "1.3 Implementar el repositorio de datos portable y su selección por modo": [
+      {
+        "executionId": "a8938e34-f918-43a9-86c4-b84a4620e355",
+        "chatSessionId": "sess_da0b8015-8d81-4046-977e-b1a180273bff",
+        "timestamp": 1792930586567
+      },
+      {
+        "executionId": "530bbbcf-5b19-4bf4-a8c9-0ba0975987d7",
+        "chatSessionId": "sess_da0b8015-8d81-4046-977e-b1a180273bff",
+        "timestamp": 1792931122372
+      },
+      {
+        "executionId": "530bbbcf-5b19-4bf4-a8c9-0ba0975987d7",
+        "chatSessionId": "sess_da0b8015-8d81-4046-977e-b1a180273bff",
+        "timestamp": 1792931557624
+      }
+    ],
+    "1.5 Crear migración del esquema GTFS y de dominio": [
+      {
+        "executionId": "a8938e34-f918-43a9-86c4-b84a4620e355",
+        "chatSessionId": "sess_da0b8015-8d81-4046-977e-b1a180273bff",
+        "timestamp": 1792930587554
+      },
+      {
+        "executionId": "530bbbcf-5b19-4bf4-a8c9-0ba0975987d7",
+        "chatSessionId": "sess_da0b8015-8d81-4046-977e-b1a180273bff",
+        "timestamp": 1792931115854
+      }
+    ],
+    "2.1 Implementar normalización de coordenadas y parsing de fuentes": [
+      {
+        "executionId": "ab6e0536-204e-48a6-8ed4-053b8a812069",
+        "chatSessionId": "sess_deb6c229-3021-4bd8-acdd-8cca1fc1b2bc",
+        "timestamp": 1792930780794
+      },
+      {
+        "executionId": "ab6e0536-204e-48a6-8ed4-053b8a812069",
+        "chatSessionId": "sess_deb6c229-3021-4bd8-acdd-8cca1fc1b2bc",
+        "timestamp": 1792931046284
+      }
+    ],
+    "2.2 Implementar serialización GeoJSON canónico": [
+      {
+        "executionId": "ab6e0536-204e-48a6-8ed4-053b8a812069",
+        "chatSessionId": "sess_deb6c229-3021-4bd8-acdd-8cca1fc1b2bc",
+        "timestamp": 1792930781748
+      },
+      {
+        "executionId": "ab6e0536-204e-48a6-8ed4-053b8a812069",
+        "chatSessionId": "sess_deb6c229-3021-4bd8-acdd-8cca1fc1b2bc",
+        "timestamp": 1792931047230
+      }
+    ],
+    "2.3 Implementar filtros por Linea y Sentido": [
+      {
+        "executionId": "ab6e0536-204e-48a6-8ed4-053b8a812069",
+        "chatSessionId": "sess_deb6c229-3021-4bd8-acdd-8cca1fc1b2bc",
+        "timestamp": 1792930782691
+      },
+      {
+        "executionId": "ab6e0536-204e-48a6-8ed4-053b8a812069",
+        "chatSessionId": "sess_deb6c229-3021-4bd8-acdd-8cca1fc1b2bc",
+        "timestamp": 1792931048635
+      }
+    ],
+    "2.4 Implementar selección de la captura más reciente por bus": [
+      {
+        "executionId": "ab6e0536-204e-48a6-8ed4-053b8a812069",
+        "chatSessionId": "sess_deb6c229-3021-4bd8-acdd-8cca1fc1b2bc",
+        "timestamp": 1792930783699
+      },
+      {
+        "executionId": "ab6e0536-204e-48a6-8ed4-053b8a812069",
+        "chatSessionId": "sess_deb6c229-3021-4bd8-acdd-8cca1fc1b2bc",
+        "timestamp": 1792931049404
+      }
+    ],
+    "2. Lógica pura de normalización, serialización, filtrado y selección de captura": [
+      {
+        "executionId": "ab6e0536-204e-48a6-8ed4-053b8a812069",
+        "chatSessionId": "sess_deb6c229-3021-4bd8-acdd-8cca1fc1b2bc",
+        "timestamp": 1792931049459
+      }
+    ],
+    "3. Ingesta de posiciones y recarga GTFS para desarrollo local": [
+      {
+        "executionId": "88069426-7def-4ee2-b6da-332e2ed6e442",
+        "chatSessionId": "sess_38b3f691-b549-4bf8-b903-252155dfa541",
+        "timestamp": 1792931089658
+      },
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792933571660
+      }
+    ],
+    "1.6 Configurar los entornos de desarrollo local (Vía A y Vía B)": [
+      {
+        "executionId": "530bbbcf-5b19-4bf4-a8c9-0ba0975987d7",
+        "chatSessionId": "sess_da0b8015-8d81-4046-977e-b1a180273bff",
+        "timestamp": 1792931564288
+      },
+      {
+        "executionId": "530bbbcf-5b19-4bf4-a8c9-0ba0975987d7",
+        "chatSessionId": "sess_da0b8015-8d81-4046-977e-b1a180273bff",
+        "timestamp": 1792931854039
+      }
+    ],
+    "1. Scaffolding del proyecto, puertos/adaptadores y selección de backend": [
+      {
+        "executionId": "530bbbcf-5b19-4bf4-a8c9-0ba0975987d7",
+        "chatSessionId": "sess_da0b8015-8d81-4046-977e-b1a180273bff",
+        "timestamp": 1792931854084
+      }
+    ],
+    "3.1 Extraer la función de ingesta/normalización compartida": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932101930
+      },
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932108786
+      },
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932570967
+      }
+    ],
+    "3.2 Implementar el adaptador node-worker del IngestScheduler y el endpoint POST /api/ingest": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932101981
+      },
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792933037378
+      },
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792933571604
+      }
+    ],
+    "3.3 Implementar la recarga GTFS (24 h) compartida": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102021
+      },
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932576010
+      },
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792933034295
+      }
+    ],
+    "4.1 Implementar manejo de errores canónico y validación de parámetros": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102065
+      },
+      {
+        "executionId": "d3f74c4b-5ce3-4445-9792-d1624c7508cf",
+        "chatSessionId": "sess_73a8d7bf-a718-44fd-ab65-b511cc6c8500",
+        "timestamp": 1792933595170
+      },
+      {
+        "executionId": "d3f74c4b-5ce3-4445-9792-d1624c7508cf",
+        "chatSessionId": "sess_73a8d7bf-a718-44fd-ab65-b511cc6c8500",
+        "timestamp": 1792933787656
+      }
+    ],
+    "4.2 Implementar endpoints de lectura geográficos (buses, paradas, líneas)": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102130
+      },
+      {
+        "executionId": "d3f74c4b-5ce3-4445-9792-d1624c7508cf",
+        "chatSessionId": "sess_73a8d7bf-a718-44fd-ab65-b511cc6c8500",
+        "timestamp": 1792933792246
+      },
+      {
+        "executionId": "d3f74c4b-5ce3-4445-9792-d1624c7508cf",
+        "chatSessionId": "sess_73a8d7bf-a718-44fd-ab65-b511cc6c8500",
+        "timestamp": 1792934157099
+      }
+    ],
+    "4.3 Implementar lógica pura del estado del mapa": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102189
+      },
+      {
+        "executionId": "d3f74c4b-5ce3-4445-9792-d1624c7508cf",
+        "chatSessionId": "sess_73a8d7bf-a718-44fd-ab65-b511cc6c8500",
+        "timestamp": 1792933595786
+      },
+      {
+        "executionId": "d3f74c4b-5ce3-4445-9792-d1624c7508cf",
+        "chatSessionId": "sess_73a8d7bf-a718-44fd-ab65-b511cc6c8500",
+        "timestamp": 1792933788250
+      }
+    ],
+    "4.4 Implementar el componente de mapa base": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102235
+      },
+      {
+        "executionId": "d3f74c4b-5ce3-4445-9792-d1624c7508cf",
+        "chatSessionId": "sess_73a8d7bf-a718-44fd-ab65-b511cc6c8500",
+        "timestamp": 1792933793070
+      },
+      {
+        "executionId": "d3f74c4b-5ce3-4445-9792-d1624c7508cf",
+        "chatSessionId": "sess_73a8d7bf-a718-44fd-ab65-b511cc6c8500",
+        "timestamp": 1792934157680
+      }
+    ],
+    "4.5 Implementar capas de buses y paradas con refresco": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102282
+      },
+      {
+        "executionId": "d3f74c4b-5ce3-4445-9792-d1624c7508cf",
+        "chatSessionId": "sess_73a8d7bf-a718-44fd-ab65-b511cc6c8500",
+        "timestamp": 1792934173409
+      },
+      {
+        "executionId": "d3f74c4b-5ce3-4445-9792-d1624c7508cf",
+        "chatSessionId": "sess_73a8d7bf-a718-44fd-ab65-b511cc6c8500",
+        "timestamp": 1792934463420
+      }
+    ],
+    "4.6 Implementar panel de filtros": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102322
+      },
+      {
+        "executionId": "d3f74c4b-5ce3-4445-9792-d1624c7508cf",
+        "chatSessionId": "sess_73a8d7bf-a718-44fd-ab65-b511cc6c8500",
+        "timestamp": 1792934466919
+      },
+      {
+        "executionId": "d3f74c4b-5ce3-4445-9792-d1624c7508cf",
+        "chatSessionId": "sess_73a8d7bf-a718-44fd-ab65-b511cc6c8500",
+        "timestamp": 1792934885141
+      }
+    ],
+    "6.1 Implementar paginación por cursor": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102363
+      }
+    ],
+    "6.2 Implementar cálculo de distancia para paradas cercanas": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102403
+      }
+    ],
+    "7.1 Implementar el job de purga (60 s, retención 6 h) invocable desde node-worker": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102443
+      }
+    ],
+    "8.1 Implementar parser de minutos oficiales": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102491
+      }
+    ],
+    "8.2 Implementar job de calibración por scraping": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102533
+      }
+    ],
+    "9.1 Implementar lógica pura de conversión distancia→tiempo y selección de ETA": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102571
+      }
+    ],
+    "9.2 Implementar funciones SQL/PostGIS de map-matching": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102611
+      }
+    ],
+    "10.1 Implementar endpoint de ETA": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102656
+      }
+    ],
+    "10.2 Implementar endpoint de paradas cercanas": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102714
+      }
+    ],
+    "10.3 Implementar geolocalización de paradas cercanas en el cliente": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102780
+      }
+    ],
+    "10.4 Implementar visualización de ETA en el cliente": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102822
+      }
+    ],
+    "11. Checkpoint Hito 2 - Estimación de llegada": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102867
+      }
+    ],
+    "12.1 Crear migración de datos de usuario con RLS": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102911
+      }
+    ],
+    "13.1 Implementar lógica pura de favoritos": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102958
+      }
+    ],
+    "13.2 Implementar lógica pura de aportaciones": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932102999
+      }
+    ],
+    "14.1 Implementar la verificación de sesión en el borde de la API sobre AuthProvider": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932103047
+      }
+    ],
+    "14.2 Implementar el adaptador supabase-auth": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932103091
+      }
+    ],
+    "14.3 Implementar el adaptador local-auth": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932103131
+      }
+    ],
+    "15.1 Implementar endpoints de favoritos y aportaciones (protegidos)": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932103176
+      }
+    ],
+    "15.2 Implementar UI de login, favoritos y aportaciones en el cliente": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932103219
+      }
+    ],
+    "16. Checkpoint Hito 3 - Funciones de usuario": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932103263
+      }
+    ],
+    "17.1 Implementar el adaptador pg_cron de posiciones (60 s)": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932103305
+      }
+    ],
+    "17.2 Implementar el job de recarga GTFS (24 h) en el adaptador pg_cron": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932103351
+      }
+    ],
+    "17.3 Implementar el job de purga (60 s, retención 6 h) en el adaptador pg_cron": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932103396
+      }
+    ],
+    "19. Checkpoint final - Validación completa": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932103437
+      }
+    ],
+    "20.1 Implementar inclusión geométrica point-in-polygon": [
+      {
+        "executionId": "c0a59305-4701-4d9c-80d6-b85ca804ce34",
+        "chatSessionId": "sess_563e71a1-ca54-4343-87ac-5c607ed3885f",
+        "timestamp": 1792932103480
+      }
+    ],
+    "4. API de lectura y frontend del mapa (sin ETA)": [
+      {
+        "executionId": "d3f74c4b-5ce3-4445-9792-d1624c7508cf",
+        "chatSessionId": "sess_73a8d7bf-a718-44fd-ab65-b511cc6c8500",
+        "timestamp": 1792934885190
+      }
+    ],
+    "5. Checkpoint Hito 1 - MVP visible en el mapa": [
+      {
+        "executionId": "2c5ac782-a07a-4106-8f58-ed4cd8d6e345",
+        "chatSessionId": "sess_104c3614-2485-4f1a-8041-6aa80cddfb5b",
+        "timestamp": 1792934902491
+      },
+      {
+        "executionId": "2c5ac782-a07a-4106-8f58-ed4cd8d6e345",
+        "chatSessionId": "sess_104c3614-2485-4f1a-8041-6aa80cddfb5b",
+        "timestamp": 1792935385105
+      }
+    ]
+  }
+}
