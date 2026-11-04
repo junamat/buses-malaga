@@ -40,6 +40,9 @@ import {
   buildListFavoritosSql,
   buildCreateFavoritoSql,
   buildDeleteFavoritoSql,
+  buildExisteLineaSql,
+  buildExisteBusSql,
+  buildIdentidadUsuarioSql,
   buildListAportacionesVigentesSql,
   buildCreateAportacionSql,
   buildLogIngestaSql,
@@ -444,6 +447,30 @@ describe("construcción de SQL", () => {
     expect(text).toContain("DELETE FROM favorites");
     expect(text).toContain("user_id = $1 AND id = $2");
     expect(params).toEqual(["u1", "fav-1"]);
+  });
+
+  it("buildCreateFavoritoSql es idempotente: ON CONFLICT y lectura del existente", () => {
+    const { text } = buildCreateFavoritoSql({ userId: "u1", tipo: "parada", codParada: "7" });
+    expect(text).toContain("ON CONFLICT ON CONSTRAINT favorites_unicidad DO NOTHING");
+    expect(text).toContain("cod_parada IS NOT DISTINCT FROM $3::text");
+  });
+
+  it("buildExisteLineaSql y buildExisteBusSql consultan routes y bus_positions", () => {
+    expect(buildExisteLineaSql(3)).toEqual({
+      text: expect.stringContaining("FROM routes WHERE route_id = $1"),
+      params: [3],
+    });
+    expect(buildExisteBusSql(501)).toEqual({
+      text: expect.stringContaining("FROM bus_positions WHERE cod_bus = $1"),
+      params: [501],
+    });
+  });
+
+  it("buildIdentidadUsuarioSql fija los claims y el rol authenticated para RLS", () => {
+    const [claims, rol] = buildIdentidadUsuarioSql("u1");
+    expect(claims.text).toContain("request.jwt.claims");
+    expect(JSON.parse(claims.params[0] as string)).toEqual({ sub: "u1", role: "authenticated" });
+    expect(rol.text).toBe("SET LOCAL ROLE authenticated");
   });
 
   it("buildListAportacionesVigentesSql aplica la ventana de vigencia de 60 min", () => {

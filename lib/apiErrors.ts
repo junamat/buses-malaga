@@ -50,6 +50,18 @@ export const API_ERROR_CODES = {
   malformedRequest: "peticion_malformada",
   /** Faltan parámetros obligatorios (Requisito 11.9). HTTP 400. */
   missingParams: "parametros_obligatorios_ausentes",
+  /** Operación protegida sin sesión válida (Requisito 7.6). HTTP 401. */
+  sessionRequired: "sesion_requerida",
+  /** Credenciales de inicio de sesión incorrectas (Requisito 7.3). HTTP 401. */
+  invalidCredentials: "credenciales_invalidas",
+  /** Identidad bloqueada tras 5 intentos fallidos (Requisito 7.4). HTTP 429. */
+  loginLocked: "bloqueado",
+  /** Límite de 500 favoritos alcanzado (Requisito 8.10). HTTP 409. */
+  favoritesLimit: "limite_favoritos",
+  /** Datos válidos sintácticamente pero no admitidos (Requisito 9.5). HTTP 422. */
+  unprocessable: "no_procesable",
+  /** Dependencia externa caída (p. ej. el proveedor de identidad). HTTP 503. */
+  unavailable: "no_disponible",
 } as const;
 
 /** Unión de los códigos de error canónicos. */
@@ -74,6 +86,12 @@ export interface ApiErrorBody {
    * de parámetros ausentes; nunca vacío cuando está presente.
    */
   params?: string[];
+  /**
+   * Datos introducidos por el usuario, devueltos sin modificar cuando la
+   * operación se rechaza por falta de sesión, para que el cliente los conserve
+   * y reintente tras iniciar sesión (Requisito 7.6).
+   */
+  datos?: unknown;
 }
 
 /**
@@ -170,6 +188,72 @@ export function missingParams(params: readonly string[]): ApiError {
       message,
       params: ausentes,
     },
+  };
+}
+
+/**
+ * Construye el error de operación protegida sin sesión (HTTP 401, Requisito
+ * 7.6). Si se aportan `datos`, se devuelven intactos en el cuerpo para que el
+ * cliente no los pierda.
+ */
+export function sessionRequired(datos?: unknown): ApiError {
+  const body: ApiErrorBody = {
+    code: API_ERROR_CODES.sessionRequired,
+    message: "Debes iniciar sesión para realizar esta operación.",
+  };
+  if (datos !== undefined) {
+    body.datos = datos;
+  }
+  return { status: 401, body };
+}
+
+/** Credenciales incorrectas (HTTP 401, Requisito 7.3). */
+export function invalidCredentials(): ApiError {
+  return {
+    status: 401,
+    body: {
+      code: API_ERROR_CODES.invalidCredentials,
+      message: "Las credenciales son incorrectas.",
+    },
+  };
+}
+
+/** Bloqueo temporal tras intentos fallidos (HTTP 429, Requisito 7.4). */
+export function loginLocked(): ApiError {
+  return {
+    status: 429,
+    body: {
+      code: API_ERROR_CODES.loginLocked,
+      message:
+        "Demasiados intentos fallidos. El inicio de sesión está bloqueado temporalmente; inténtalo de nuevo en unos minutos.",
+    },
+  };
+}
+
+/** Límite de favoritos alcanzado (HTTP 409, Requisito 8.10). */
+export function favoritesLimit(limite: number): ApiError {
+  return {
+    status: 409,
+    body: {
+      code: API_ERROR_CODES.favoritesLimit,
+      message: `Has alcanzado el límite de ${limite} favoritos.`,
+    },
+  };
+}
+
+/** Petición bien formada pero con datos no admitidos (HTTP 422). */
+export function unprocessable(message: string): ApiError {
+  return {
+    status: 422,
+    body: { code: API_ERROR_CODES.unprocessable, message },
+  };
+}
+
+/** Dependencia externa no disponible (HTTP 503). */
+export function unavailable(message: string): ApiError {
+  return {
+    status: 503,
+    body: { code: API_ERROR_CODES.unavailable, message },
   };
 }
 

@@ -235,3 +235,64 @@ export function isApiError(value: unknown): value is ApiError {
     "body" in value
   );
 }
+
+// ---------------------------------------------------------------------------
+// Parámetros de los endpoints de usuario (favoritos y aportaciones)
+// ---------------------------------------------------------------------------
+
+/** Tamaño máximo aceptado para el cuerpo JSON de una petición de usuario. */
+export const MAX_JSON_BODY_BYTES = 16 * 1024;
+
+/**
+ * Lee el cuerpo JSON de la petición. Devuelve `{ datos }` (envuelto, para no
+ * confundir un cuerpo cualquiera con un `ApiError`) o un `ApiError` de petición
+ * malformada si está vacío, no es JSON o excede {@link MAX_JSON_BODY_BYTES}
+ * (Requisito 11.8).
+ */
+export async function parseJsonBody(
+  request: Request,
+): Promise<{ datos: unknown } | ApiError> {
+  let texto: string;
+  try {
+    texto = await request.text();
+  } catch {
+    return malformedRequest("No se ha podido leer el cuerpo de la petición.");
+  }
+  if (texto.length > MAX_JSON_BODY_BYTES) {
+    return malformedRequest("El cuerpo de la petición es demasiado grande.");
+  }
+  if (texto.trim() === "") {
+    return malformedRequest("La petición necesita un cuerpo JSON.");
+  }
+  try {
+    return { datos: JSON.parse(texto) as unknown };
+  } catch {
+    return malformedRequest("El cuerpo de la petición no es JSON válido.");
+  }
+}
+
+/**
+ * Valida el `codBus` del segmento de ruta: obligatorio (11.9) y entero no
+ * negativo (11.8).
+ */
+export function parseCodBus(raw: string | undefined): number | ApiError {
+  const error = validateRequiredParams(["codBus"], { codBus: raw });
+  if (error !== null) {
+    return error;
+  }
+  const valor = (raw as string).trim();
+  if (!/^\d+$/.test(valor) || !Number.isSafeInteger(Number(valor))) {
+    return malformedRequest(
+      `El parámetro "codBus" debe ser un entero no negativo; se recibió "${valor}".`,
+    );
+  }
+  return Number(valor);
+}
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** ¿Es `value` un UUID con formato canónico (8-4-4-4-12)? */
+export function isUuid(value: string): boolean {
+  return UUID_RE.test(value);
+}

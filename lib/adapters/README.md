@@ -28,3 +28,15 @@ proveedores de autenticación. Implementados a partir de la tarea 1.3.
   `ejecutarIngesta` y registra el resultado en `ingest_log`. Es un adaptador
   **solo de desarrollo**: la factoría lo cablea únicamente en `local-postgres` y
   el endpoint se cierra (404) en el resto de modos.
+
+- `auth-supabase.ts` (tarea 14.2) — `AuthProvider` sobre la API REST de GoTrue
+  (`/auth/v1/token`, `/auth/v1/logout`, `/auth/v1/user`) con `fetch` y timeout
+  de 5 s, sin SDK de Supabase. Modos `supabase-*`.
+
+- `auth-local.ts` (tarea 14.3) — `AuthProvider` con credenciales `scrypt` y
+  sesiones (SHA-256 del token, 30 días desde el último acceso) en el Postgres
+  local, más el usuario de desarrollo "sin login". Modo `local-postgres`.
+
+- `auth-store-postgres.ts` — almacenes Postgres de los dos adaptadores: el
+  contador de intentos fallidos (`auth_login_attempts`, compartido) y las
+  credenciales/sesiones de `local-auth`.

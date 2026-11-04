@@ -14,15 +14,26 @@
  * plataforma concreta. Esta factoría es el único lugar que conoce qué adaptador
  * corresponde a cada modo y cablea la cadena de conexión y las claves.
  *
- * Nota de alcance (tarea 1.2): los adaptadores concretos todavía no existen
- * (llegan en tareas posteriores: repositorio 1.3, scheduler/auth 3.2 y 14.x).
- * Aquí se fija la selección de modo, la carga/validación de configuración y los
- * puntos de cableado. Instanciar un adaptador antes de que exista lanza un error
+ * Estado de los adaptadores: repositorio (tarea 1.3), `node-worker` (3.2) y los
+ * dos `AuthProvider` (14.2, 14.3) están cableados. Solo falta el scheduler
+ * `pg_cron` de los modos `supabase-*` (Hito 4); pedirlo lanza un error
  * explícito de "no implementado" en lugar de fallar de forma opaca.
  */
 
 import type { Repository, IngestScheduler, AuthProvider } from "@/lib/ports";
-import { createPostgresRepository } from "@/lib/adapters/repository-postgres";
+import { Pool } from "pg";
+
+import {
+  createPostgresRepository,
+  crearQueryClientPool,
+  type QueryClient,
+} from "@/lib/adapters/repository-postgres";
+import { createSupabaseAuthProvider } from "@/lib/adapters/auth-supabase";
+import { createLocalAuthProvider } from "@/lib/adapters/auth-local";
+import {
+  createPostgresLocalAuthStore,
+  createPostgresLoginAttemptStore,
+} from "@/lib/adapters/auth-store-postgres";
 import {
   NodeWorkerIngestScheduler,
   type IntervalosWorker,
@@ -227,7 +238,7 @@ export class AdapterNotImplementedError extends Error {
   ) {
     super(
       `Adaptador "${port}" para el modo "${provider}" aún no implementado. ` +
-        `Se cablea en una tarea posterior (repositorio 1.3, scheduler/auth 3.2 y 14.x).`,
+        `Se cablea en una tarea posterior (scheduler pg_cron, Hito 4).`,
     );
     this.name = "AdapterNotImplementedError";
   }
@@ -307,18 +318,38 @@ export function buildLocalIngestConfig(config: BackendConfig): IngestConfig {
 
 /**
  * Selecciona y construye el adaptador de `AuthProvider` para el modo dado:
- * `supabase-auth` (GoTrue) en los modos `supabase-*`, `local-auth` (usuario de
- * desarrollo) en `local-postgres`.
+ * `supabase-auth` (GoTrue) en los modos `supabase-*`, `local-auth` (credenciales
+ * en Postgres + usuario de desarrollo opcional) en `local-postgres`. Ambos
+ * guardan el contador de intentos fallidos en `auth_login_attempts`.
+ *
+ * @param client Cliente de consultas para los almacenes de auth; por defecto
+ *   abre un pool pequeño propio sobre `config.databaseUrl`.
  */
-export function createAuthProvider(config: BackendConfig): AuthProvider {
+export function createAuthProvider(
+  config: BackendConfig,
+  client: QueryClient = crearQueryClientPool(
+    new Pool({ connectionString: config.databaseUrl, max: 3 }),
+  ),
+): AuthProvider {
+  const intentos = createPostgresLoginAttemptStore(client);
   switch (config.provider) {
     case "supabase-cloud":
-    case "supabase-local":
-      // TODO(tarea 3.2): adaptador supabase-auth (GoTrue) con config.supabase.
-      throw new AdapterNotImplementedError("AuthProvider", config.provider);
+    case "supabase-local": {
+      if (config.supabase === undefined) {
+        throw new Error(`Falta la configuración de Supabase para "${config.provider}".`);
+      }
+      return createSupabaseAuthProvider({
+        url: config.supabase.url,
+        anonKey: config.supabase.anonKey,
+        intentos,
+      });
+    }
     case "local-postgres":
-      // TODO(tarea 3.2): adaptador local-auth con usuario de desarrollo.
-      throw new AdapterNotImplementedError("AuthProvider", config.provider);
+      return createLocalAuthProvider({
+        store: createPostgresLocalAuthStore(client),
+        intentos,
+        devUser: config.devUserEnabled,
+      });
     default:
       return assertNever(config.provider);
   }

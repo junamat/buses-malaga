@@ -46,6 +46,10 @@ import {
   Tooltip,
   useMapEvents,
 } from "react-leaflet";
+import { UserProvider } from "@/app/components/user/UserContext";
+import UserPanel from "@/app/components/user/UserPanel";
+import FavoritoButton from "@/app/components/user/FavoritoButton";
+import AportacionesBus from "@/app/components/user/AportacionesBus";
 import type { LatLngBoundsExpression } from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -355,6 +359,10 @@ function ParadaEtaContent({ codParada }: { codParada: string }): JSX.Element {
       {etas.map((eta) => (
         <span key={`${eta.codLinea}-${eta.sentido}`} style={{ display: "block" }}>
           L{eta.codLinea} · S{eta.sentido}: {formatEta(eta)}
+          <FavoritoButton
+            referencia={{ tipo: "parada_linea", codParada, codLinea: eta.codLinea }}
+            etiqueta={`Línea ${eta.codLinea} en esta parada`}
+          />
         </span>
       ))}
     </span>
@@ -400,7 +408,10 @@ function BusStopMarkers({
               <strong>{nombre}</strong>
               <br />
               <span>Parada {codParada}</span>
-              <br />
+              <FavoritoButton
+                referencia={{ tipo: "parada", codParada }}
+                etiqueta="Parada favorita"
+              />
               <ParadaEtaContent codParada={codParada} />
             </Popup>
           </CircleMarker>
@@ -438,6 +449,11 @@ function BusStopMarkers({
               </span>
               <br />
               <span>Bus {codBus}</span>
+              <FavoritoButton
+                referencia={{ tipo: "linea", codLinea }}
+                etiqueta={`Línea ${codLinea} favorita`}
+              />
+              <AportacionesBus codBus={codBus} />
             </Popup>
           </CircleMarker>
         );
@@ -499,7 +515,23 @@ function buildInitialState(): MapState {
   });
 }
 
+/**
+ * Mapa con las funciones de usuario (Hito 3): el `UserProvider` envuelve el
+ * mapa para que los popups (portales de React) accedan a la sesión y a los
+ * favoritos, y el `UserPanel` muestra login/logout y la lista de favoritos.
+ */
 export default function MapaBase(): JSX.Element {
+  return (
+    <UserProvider>
+      <div style={{ position: "relative", width: "100%", height: "100%" }}>
+        <MapaContenido />
+        <UserPanel />
+      </div>
+    </UserProvider>
+  );
+}
+
+function MapaContenido(): JSX.Element {
   const [state, setState] = useState<MapState>(buildInitialState);
 
   // Capas de datos: paradas (estáticas) y buses (refresco de 1 min; Req 2.5).

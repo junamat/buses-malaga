@@ -41,7 +41,8 @@ y las extensiones `pg_cron` / `pg_net`. Al usar los mismos adaptadores que
 # 1. Arranca la pila (Postgres+PostGIS, GoTrue, pg_cron, pg_net, Studio).
 npm run supabase:start
 
-# 2. Aplica las migraciones 0001 (esquema+PostGIS) y 0002 (pg_cron+pg_net).
+# 2. Aplica las migraciones 0001 (esquema+PostGIS), 0002 (pg_cron+pg_net),
+#    0003 (destinos) y 0004 (datos de usuario con RLS).
 npm run db:apply:supabase-local
 
 # 3. Consulta las URLs y claves generadas (SUPABASE_URL, anon/service_role, DB).
@@ -81,7 +82,10 @@ del CLI (`supabase/.temp`, `supabase/.branches`, `supabase/.env`) están en
 Idénticas a producción: la ingesta periódica la programan los jobs `pg_cron`
 (transporte HTTP con `pg_net`, tareas del Hito 4) y la autenticación la gestiona
 GoTrue. La verificación de sesión en el borde de la API (Requisito 7.6) usa el
-adaptador `supabase-auth`.
+adaptador `supabase-auth`, que habla con la API REST de GoTrue (`SUPABASE_URL` +
+`SUPABASE_ANON_KEY`): crea usuarios desde Studio (Authentication → Users) o con
+la API de signup. El bloqueo tras 5 intentos fallidos lo aplica la app sobre
+`auth_login_attempts`, porque GoTrue solo limita por IP.
 
 ---
 
@@ -99,8 +103,10 @@ eso es la base de los tests de integración reproducibles en CI.
 ### Arranque con Docker (recomendado)
 
 ```bash
-# 1. Levanta Postgres + PostGIS. El contenedor aplica SOLO la migración 0001
-#    automáticamente (vía /docker-entrypoint-initdb.d) la primera vez.
+# 1. Levanta Postgres + PostGIS. El contenedor aplica 0001, 0003, 0004 y 0005
+#    automáticamente (vía /docker-entrypoint-initdb.d) la primera vez. Si ya
+#    tenías el volumen de antes del Hito 3, aplica las nuevas a mano
+#    (npm run db:apply:local-postgres) o recrea con npm run localpg:reset.
 npm run localpg:up
 ```
 
@@ -142,7 +148,7 @@ npm run localpg:reset    # elimina el volumen y recrea la BD (re-aplica 0001)
 ```bash
 createdb buses_malaga
 psql buses_malaga -c "CREATE EXTENSION IF NOT EXISTS postgis;"
-npm run db:apply:local-postgres   # aplica SOLO 0001
+npm run db:apply:local-postgres   # aplica 0001, 0003, 0004 y 0005 (nunca 0002)
 ```
 
 Ajusta `DATABASE_URL` a tu instancia nativa.
@@ -213,7 +219,33 @@ credenciales locales. La verificación de sesión en el borde de la API
 (Requisito 7.6) es idéntica a nivel de interfaz: cambia la implementación de
 `AuthProvider`, no el contrato ni el comportamiento observable.
 
-> El adaptador `local-auth` se implementa en la tarea 14.3.
+Con el usuario de desarrollo activo, una petición **sin** token se trata como
+ese usuario (`user_id` `00000000-0000-4000-8000-000000000001`); una petición con
+token se verifica normalmente. Para crear usuarios locales (migración 0005):
+
+```bash
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/buses_malaga \
+  npm run localauth:user -- ana@example.com 'una-contraseña'
+```
+
+Las contraseñas se guardan con `scrypt` y las sesiones por SHA-256 del token;
+caducan a los 30 días desde el último acceso.
+
+### Tests de integración contra Postgres
+
+`npm run test:integration` ejecuta los tests de RLS, unicidad y almacenes de
+auth contra una base real. Se omiten si `TEST_DATABASE_URL` no está definida.
+**Vacían las tablas de usuario**: usa una base desechable, nunca la de
+desarrollo. Por ejemplo:
+
+```bash
+docker run -d --rm --name bm-test-pg -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=bm_test -p 55432:5432 postgis/postgis:15-3.4
+for f in 0001_schema_gtfs_dominio 0003_route_directions_destinos 0004_datos_usuario_rls 0005_local_auth; do
+  docker exec -i bm-test-pg psql -U postgres -d bm_test -v ON_ERROR_STOP=1 < db/migrations/$f.sql
+done
+TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55432/bm_test npm run test:integration
+```
 
 ---
 

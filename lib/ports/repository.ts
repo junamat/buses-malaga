@@ -228,10 +228,36 @@ export interface Repository {
 
   // --- Favoritos y aportaciones -------------------------------------------
 
-  listFavoritos(userId: string): Promise<Favorito[]>;
-  createFavorito(fav: NuevoFavorito): Promise<Favorito>;
-  deleteFavorito(userId: string, id: string): Promise<void>;
+  //
+  // Las operaciones de usuario se ejecutan con la identidad del usuario
+  // (claims + rol `authenticated`), de modo que las políticas RLS de
+  // `db/migrations/0004_*.sql` se aplican igual en los tres modos.
 
+  /** ¿Existe la Linea? Validación de alta de favoritos (Requisito 8.4). */
+  existeLinea(codLinea: CodLinea): Promise<boolean>;
+
+  /**
+   * ¿Es el `codBus` un vehículo conocido (con alguna captura en
+   * `bus_positions`)? Validación de aportaciones (Requisito 9.4).
+   */
+  existeBus(codBus: CodBus): Promise<boolean>;
+
+  /** Favoritos del usuario, en orden de alta. (Requisitos 8.5, 8.6) */
+  listFavoritos(userId: string): Promise<Favorito[]>;
+
+  /**
+   * Alta idempotente: si el favorito ya existe para el usuario devuelve el
+   * registro existente en lugar de duplicarlo (Requisito 8.9).
+   */
+  createFavorito(fav: NuevoFavorito): Promise<Favorito>;
+
+  /**
+   * Baja de un favorito del usuario. Devuelve `false` si no figuraba en su
+   * conjunto, sin modificar nada (Requisito 8.8).
+   */
+  deleteFavorito(userId: string, id: string): Promise<boolean>;
+
+  /** Aportaciones del vehículo dentro de la ventana de vigencia de 60 min. */
   listAportacionesVigentes(codBus: CodBus): Promise<Aportacion[]>;
   createAportacion(aportacion: NuevaAportacion): Promise<Aportacion>;
 }

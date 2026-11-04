@@ -264,28 +264,28 @@ Las tareas se agrupan en cuatro hitos de entrega más una sección de fase 2. Ca
 
 **Objetivo de producto:** al terminar este hito el usuario puede iniciar sesión, gestionar favoritos (paradas, líneas y combinaciones) y enviar aportaciones por vehículo, con aislamiento por usuario mediante RLS.
 
-- [ ] 12. Datos de usuario con RLS
-  - [~] 12.1 Crear migración de datos de usuario con RLS
+- [x] 12. Datos de usuario con RLS
+  - [x] 12.1 Crear migración de datos de usuario con RLS
     - Crear `favorites` (`id`, `user_id`, `tipo`, `cod_parada`, `cod_linea`) con restricción de unicidad por (`user_id`, `tipo`, `cod_parada`, `cod_linea`).
     - Crear `vehicle_contributions` (`id`, `user_id`, `cod_bus`, `opcion`, `created_at`).
     - Activar Row Level Security sobre ambas y definir políticas que restrinjan acceso por `auth.uid() = user_id`.
     - _Requisitos: 7.6, 8.1, 8.9, 9.1_
 
-  - [ ]* 12.2 Escribir tests de integración de RLS y unicidad contra una BD de prueba
+  - [x]* 12.2 Escribir tests de integración de RLS y unicidad contra una BD de prueba
     - Verificar que la restricción de unicidad de `favorites` impide duplicados y que las políticas RLS aíslan por `user_id`.
     - Los tests corren contra Postgres local (modo `local-postgres`) sin depender de Supabase cloud.
     - _Requisitos: 8.9_
 
-- [ ] 13. Lógica pura de favoritos y aportaciones
-  - [~] 13.1 Implementar lógica pura de favoritos
+- [x] 13. Lógica pura de favoritos y aportaciones
+  - [x] 13.1 Implementar lógica pura de favoritos
     - Escribir `lib/favorites.ts`: alta validando existencia del elemento y unicidad (idempotencia), aplicación del límite de 500, consulta del conjunto (posiblemente vacío) y baja idempotente, todo conservando el resto de favoritos.
     - _Requisitos: 8.1, 8.2, 8.3, 8.4, 8.5, 8.7, 8.8, 8.9, 8.10_
 
-  - [~] 13.2 Implementar lógica pura de aportaciones
+  - [x] 13.2 Implementar lógica pura de aportaciones
     - Escribir `lib/contributions.ts`: catálogo de ≤10 opciones; validar que el `codBus` existe y que la opción pertenece al catálogo; persistir aportación válida; filtrar por la ventana de vigencia de 60 min al consultar.
     - _Requisitos: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6_
 
-  - [ ]* 13.3 Escribir property tests de favoritos
+  - [x]* 13.3 Escribir property tests de favoritos
     - **Property 20: Marcar un favorito existente lo añade al conjunto del usuario**
     - **Property 21: Referenciar un elemento inexistente rechaza y preserva el conjunto**
     - **Property 22: La consulta de favoritos recupera el conjunto del usuario**
@@ -294,51 +294,52 @@ Las tareas se agrupan en cuatro hitos de entrega más una sección de fase 2. Ca
     - **Property 25: Marcar un favorito es idempotente**
     - **Validates: Requirements 8.1, 8.2, 8.3, 8.4, 8.5, 8.7, 8.8, 8.9**
 
-  - [ ]* 13.4 Escribir property tests de aportaciones
+  - [x]* 13.4 Escribir property tests de aportaciones
     - **Property 26: Una aportación válida queda persistida y asociada**
     - **Property 27: Solo se muestran las aportaciones vigentes**
     - **Property 28: codBus desconocido rechaza la aportación con motivo**
     - **Property 29: Una opción fuera del catálogo rechaza sin persistir**
     - **Validates: Requirements 9.1, 9.3, 9.4, 9.5, 9.6**
 
-- [ ] 14. Autenticación y protección de operaciones (AuthProvider)
-  - [~] 14.1 Implementar la verificación de sesión en el borde de la API sobre AuthProvider
+- [x] 14. Autenticación y protección de operaciones (AuthProvider)
+  - [x] 14.1 Implementar la verificación de sesión en el borde de la API sobre AuthProvider
     - Escribir `lib/auth.ts`: proteger los route handlers a través de la interfaz `AuthProvider` (resolver `user_id`, verificar sesión); cuando no hay sesión, rechazar la operación conservando los datos introducidos y exigir login. El contrato es idéntico en los tres modos; solo cambia el adaptador.
     - _Requisitos: 7.6_
 
-  - [~] 14.2 Implementar el adaptador supabase-auth
+  - [x] 14.2 Implementar el adaptador supabase-auth
     - Escribir `lib/adapters/auth-supabase.ts`: implementación del puerto `AuthProvider` que delega en Supabase Auth (GoTrue) y verifica el JWT de Supabase en el borde de la API. Adaptador usado en los modos `supabase-cloud` y `supabase-local`.
     - _Requisitos: 7.6_
 
-  - [~] 14.3 Implementar el adaptador local-auth
+  - [x] 14.3 Implementar el adaptador local-auth
     - Escribir `lib/adapters/auth-local.ts`: implementación local simple del puerto `AuthProvider` con credenciales en el Postgres local, incluyendo un **modo "sin login" / usuario de desarrollo** que resuelve un `user_id` fijo. Adaptador usado en el modo `local-postgres`.
     - _Requisitos: 7.6_
 
-  - [ ]* 14.4 Escribir property test de operaciones protegidas sin sesión
+  - [x]* 14.4 Escribir property test de operaciones protegidas sin sesión
     - **Property 19: Las operaciones protegidas sin sesión se rechazan sin mutar datos**
     - **Validates: Requirements 7.6**
 
   - [ ]* 14.5 Escribir tests de integración del flujo de autenticación
     - Verificar login con credenciales válidas, expiración de 30 días, bloqueo tras 5 intentos fallidos y logout contra Supabase Auth (adaptador `supabase-auth`).
     - Verificar que el adaptador `local-auth` resuelve el usuario de desarrollo y protege las operaciones por igual a nivel de contrato.
+    - _Estado:_ `local-auth` cubierto (unitario + integración contra Postgres en `lib/adapters/user-data.integration.test.ts`); `supabase-auth` cubierto solo contra un GoTrue simulado (`lib/adapters/auth-supabase.test.ts`). Falta la verificación contra Supabase Auth real (`supabase start`).
     - _Requisitos: 7.1, 7.2, 7.3, 7.4, 7.5_
 
-- [ ] 15. Endpoints protegidos y UI de usuario
-  - [~] 15.1 Implementar endpoints de favoritos y aportaciones (protegidos)
+- [x] 15. Endpoints protegidos y UI de usuario
+  - [x] 15.1 Implementar endpoints de favoritos y aportaciones (protegidos)
     - Implementar `GET/POST /api/favoritos`, `DELETE /api/favoritos/{id}`, `GET/POST /api/buses/{codBus}/aportaciones`, cableando `lib/auth.ts`, `lib/favorites.ts` y `lib/contributions.ts`.
     - _Requisitos: 8.1, 8.5, 8.7, 9.1, 9.3, 7.6_
 
-  - [~] 15.2 Implementar UI de login, favoritos y aportaciones en el cliente
+  - [x] 15.2 Implementar UI de login, favoritos y aportaciones en el cliente
     - UI de login/logout con el cliente Supabase; alta/consulta/baja de favoritos y alta/consulta de aportaciones cableando los endpoints protegidos.
     - _Requisitos: 7.1, 7.5, 8.1, 8.5, 8.7, 9.1, 9.3_
 
-  - [ ]* 15.3 Escribir property tests del contrato HTTP de errores
+  - [x]* 15.3 Escribir property tests del contrato HTTP de errores
     - **Property 35: Un recurso inexistente devuelve no encontrado**
     - **Property 36: Una petición malformada devuelve error de cliente**
     - **Property 37: Los parámetros obligatorios ausentes se identifican**
     - **Validates: Requirements 11.7, 11.8, 11.9**
 
-- [~] 16. Checkpoint Hito 3 - Funciones de usuario
+- [x] 16. Checkpoint Hito 3 - Funciones de usuario
   - Ejecutar todos los tests de los hitos 1 a 3, asegurar que pasan; preguntar al usuario si surgen dudas.
 
 ### Hito 4 — "Robustez y despliegue en producción"

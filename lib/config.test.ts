@@ -142,7 +142,7 @@ describe("factoría de adaptadores", () => {
     }
   });
 
-  it("el AuthProvider sigue sin implementar y lanza AdapterNotImplementedError en todos los modos", () => {
+  it("createAuthProvider cablea un AuthProvider en todos los modos (tareas 14.2, 14.3)", () => {
     for (const provider of BACKEND_PROVIDERS) {
       const config = loadBackendConfig(
         usesSupabase(provider)
@@ -150,9 +150,10 @@ describe("factoría de adaptadores", () => {
           : { BACKEND_PROVIDER: provider, DATABASE_URL: DB_URL },
       );
 
-      expect(() => createAuthProvider(config)).toThrow(
-        AdapterNotImplementedError,
-      );
+      // No abre conexión hasta la primera consulta.
+      const auth = createAuthProvider(config);
+      expect(typeof auth.login).toBe("function");
+      expect(typeof auth.verificarSesion).toBe("function");
     }
   });
 
@@ -192,12 +193,12 @@ describe("factoría de adaptadores", () => {
   it("el error de un adaptador no implementado identifica el puerto y el modo", () => {
     const config = loadBackendConfig(supabaseEnv("supabase-cloud"));
     try {
-      createAuthProvider(config);
+      createIngestScheduler(config, {} as never);
       throw new Error("debería haber lanzado");
     } catch (e) {
       expect(e).toBeInstanceOf(AdapterNotImplementedError);
       const err = e as AdapterNotImplementedError;
-      expect(err.port).toBe("AuthProvider");
+      expect(err.port).toBe("IngestScheduler");
       expect(err.provider).toBe("supabase-cloud");
     }
   });

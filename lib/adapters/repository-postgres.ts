@@ -25,8 +25,8 @@
  * Nombres de tablas/columnas alineados con `db/migrations/0001_*.sql`
  * (`routes`, `trips`, `stops`, `stop_times`, `shapes`, `bus_positions`,
  * `official_minutes`, `ingest_log`) y con el modelo de datos del diseño para
- * las tablas de usuario (`favorites`, `vehicle_contributions`), que se crean en
- * una migración posterior (Hito 3, tarea 12.1).
+ * las tablas de usuario (`favorites`, `vehicle_contributions`), creadas con RLS
+ * en `db/migrations/0004_*.sql` (tarea 12.1).
  */
 
 import { Pool, type PoolClient, type PoolConfig, type QueryResultRow } from "pg";
@@ -909,33 +909,64 @@ export function buildInsertRouteDirectionsSql(
   };
 }
 
-/** SQL de `listFavoritos`: favoritos de un usuario, orden estable por `id`. */
+/** SQL de `existeLinea`: ¿hay una fila en `routes` con ese `route_id`? */
+export function buildExisteLineaSql(codLinea: CodLinea): SqlStatement {
+  return {
+    text: "SELECT EXISTS (SELECT 1 FROM routes WHERE route_id = $1) AS existe",
+    params: [codLinea],
+  };
+}
+
+/**
+ * SQL de `existeBus`: un `codBus` es conocido si tiene alguna captura en
+ * `bus_positions` dentro de la ventana de retención (Requisito 9.4).
+ */
+export function buildExisteBusSql(codBus: CodBus): SqlStatement {
+  return {
+    text: "SELECT EXISTS (SELECT 1 FROM bus_positions WHERE cod_bus = $1) AS existe",
+    params: [codBus],
+  };
+}
+
+/** SQL de `listFavoritos`: favoritos de un usuario en orden de alta. */
 export function buildListFavoritosSql(userId: string): SqlStatement {
   return {
     text:
       "SELECT id, user_id, tipo, cod_parada, cod_linea FROM favorites " +
-      "WHERE user_id = $1 ORDER BY id ASC",
+      "WHERE user_id = $1 ORDER BY created_at ASC, id ASC",
     params: [userId],
   };
 }
 
 /**
- * SQL de `createFavorito`: alta de favorito. El `id` lo genera la base de datos
- * (`gen_random_uuid()`/`DEFAULT`); se devuelve la fila insertada.
+ * SQL de `createFavorito`: alta idempotente. El `id` lo genera la base de datos
+ * (`DEFAULT gen_random_uuid()`). Si ya existe un favorito igual para el usuario
+ * (`favorites_unicidad`), no inserta y devuelve el registro existente
+ * (Requisito 8.9). La rama de lectura no ve la fila del `INSERT` (misma
+ * instantánea), por eso solo se evalúa cuando no hubo inserción.
  */
 export function buildCreateFavoritoSql(fav: NuevoFavorito): SqlStatement {
   return {
     text:
+      "WITH ins AS (" +
       "INSERT INTO favorites (user_id, tipo, cod_parada, cod_linea) " +
-      "VALUES ($1, $2, $3, $4) " +
-      "RETURNING id, user_id, tipo, cod_parada, cod_linea",
+      "VALUES ($1::uuid, $2::text, $3::text, $4::bigint) " +
+      "ON CONFLICT ON CONSTRAINT favorites_unicidad DO NOTHING " +
+      "RETURNING id, user_id, tipo, cod_parada, cod_linea) " +
+      "SELECT id, user_id, tipo, cod_parada, cod_linea FROM ins " +
+      "UNION ALL " +
+      "SELECT id, user_id, tipo, cod_parada, cod_linea FROM favorites " +
+      "WHERE NOT EXISTS (SELECT 1 FROM ins) AND user_id = $1::uuid " +
+      "AND tipo = $2::text AND cod_parada IS NOT DISTINCT FROM $3::text " +
+      "AND cod_linea IS NOT DISTINCT FROM $4::bigint " +
+      "LIMIT 1",
     params: [fav.userId, fav.tipo, fav.codParada ?? null, fav.codLinea ?? null],
   };
 }
 
 /**
- * SQL de `deleteFavorito`: baja por `id` restringida al `user_id` dueño (la baja
- * es idempotente: no es error que no exista).
+ * SQL de `deleteFavorito`: baja por `id` restringida al `user_id` dueño. El
+ * `rowCount` distingue "eliminado" de "no figuraba en su conjunto" (8.8).
  */
 export function buildDeleteFavoritoSql(
   userId: string,
@@ -945,6 +976,24 @@ export function buildDeleteFavoritoSql(
     text: "DELETE FROM favorites WHERE user_id = $1 AND id = $2",
     params: [userId, id],
   };
+}
+
+/**
+ * Sentencias que fijan la identidad del usuario dentro de una transacción para
+ * que las políticas RLS (`auth.uid() = user_id`) se apliquen: claims de la
+ * petición (lo que lee `auth.uid()` en Supabase y en el shim de 0004) y rol
+ * `authenticated`. Ambas son locales a la transacción.
+ */
+export function buildIdentidadUsuarioSql(userId: string): SqlStatement[] {
+  return [
+    {
+      text:
+        "SELECT set_config('request.jwt.claims', $1, true), " +
+        "set_config('request.jwt.claim.sub', $2, true)",
+      params: [JSON.stringify({ sub: userId, role: "authenticated" }), userId],
+    },
+    { text: "SET LOCAL ROLE authenticated", params: [] },
+  ];
 }
 
 /**
@@ -1151,21 +1200,40 @@ export class PostgresRepository implements Repository {
     return rowCount ?? 0;
   }
 
+  async existeLinea(codLinea: CodLinea): Promise<boolean> {
+    const { text, params } = buildExisteLineaSql(codLinea);
+    const { rows } = await this.client.query<{ existe: boolean }>(text, params);
+    return rows[0]?.existe === true;
+  }
+
+  async existeBus(codBus: CodBus): Promise<boolean> {
+    const { text, params } = buildExisteBusSql(codBus);
+    const { rows } = await this.client.query<{ existe: boolean }>(text, params);
+    return rows[0]?.existe === true;
+  }
+
   async listFavoritos(userId: string): Promise<Favorito[]> {
-    const { text, params } = buildListFavoritosSql(userId);
-    const { rows } = await this.client.query<FavoritoRow>(text, params);
-    return rows.map(mapFavorito);
+    return this.comoUsuario(userId, async (tx) => {
+      const { text, params } = buildListFavoritosSql(userId);
+      const { rows } = await tx.query<FavoritoRow>(text, params);
+      return rows.map(mapFavorito);
+    });
   }
 
   async createFavorito(fav: NuevoFavorito): Promise<Favorito> {
-    const { text, params } = buildCreateFavoritoSql(fav);
-    const { rows } = await this.client.query<FavoritoRow>(text, params);
-    return mapFavorito(rows[0]);
+    return this.comoUsuario(fav.userId, async (tx) => {
+      const { text, params } = buildCreateFavoritoSql(fav);
+      const { rows } = await tx.query<FavoritoRow>(text, params);
+      return mapFavorito(rows[0]);
+    });
   }
 
-  async deleteFavorito(userId: string, id: string): Promise<void> {
-    const { text, params } = buildDeleteFavoritoSql(userId, id);
-    await this.client.query(text, params);
+  async deleteFavorito(userId: string, id: string): Promise<boolean> {
+    return this.comoUsuario(userId, async (tx) => {
+      const { text, params } = buildDeleteFavoritoSql(userId, id);
+      const { rowCount } = await tx.query(text, params);
+      return (rowCount ?? 0) > 0;
+    });
   }
 
   async listAportacionesVigentes(codBus: CodBus): Promise<Aportacion[]> {
@@ -1175,9 +1243,11 @@ export class PostgresRepository implements Repository {
   }
 
   async createAportacion(aportacion: NuevaAportacion): Promise<Aportacion> {
-    const { text, params } = buildCreateAportacionSql(aportacion);
-    const { rows } = await this.client.query<AportacionRow>(text, params);
-    return mapAportacion(rows[0]);
+    return this.comoUsuario(aportacion.userId, async (tx) => {
+      const { text, params } = buildCreateAportacionSql(aportacion);
+      const { rows } = await tx.query<AportacionRow>(text, params);
+      return mapAportacion(rows[0]);
+    });
   }
 
   async logIngesta(result: IngestResult): Promise<void> {
@@ -1191,6 +1261,27 @@ export class PostgresRepository implements Repository {
       return;
     }
     await this.client.query(statement.text, statement.params);
+  }
+
+  /**
+   * Ejecuta `fn` en una transacción con la identidad del usuario fijada
+   * (claims + rol `authenticated`), de modo que RLS filtre por `user_id` aunque
+   * la conexión del servidor sea la del dueño de las tablas. Sin soporte de
+   * transacciones (dobles de test) se ejecuta directamente.
+   */
+  private async comoUsuario<T>(
+    userId: string,
+    fn: (tx: QueryClient) => Promise<T>,
+  ): Promise<T> {
+    if (this.client.withTransaction === undefined) {
+      return fn(this.client);
+    }
+    return this.client.withTransaction(async (tx) => {
+      for (const { text, params } of buildIdentidadUsuarioSql(userId)) {
+        await tx.query(text, params);
+      }
+      return fn(tx);
+    });
   }
 }
 
