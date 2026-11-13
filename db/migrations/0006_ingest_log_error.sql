@@ -1,0 +1,21 @@
+-- =============================================================================
+-- Migración 0006 — Causa de fallo en ingest_log (columna `error`)
+-- Buses de Málaga
+--
+-- Añade la columna `error` a `ingest_log` para persistir el mensaje de error
+-- del ciclo cuando `estado = 'fallo'`. Hasta ahora el `IngestResult.error` que
+-- construye la ingesta compartida (`lib/ingest.ts`) se descartaba al registrar
+-- el ciclo: `ingest_log` solo guardaba `(fuente, estado, run_at)`, de modo que
+-- un fallo intermitente de fuente (p. ej. timeout o HTTP no-2xx del portal de
+-- datos abiertos) quedaba registrado como "fallo" sin causa, imposible de
+-- diagnosticar a posteriori sin reproducirlo.
+--
+-- La columna es NULL-able: solo las filas con `estado = 'fallo'` llevan mensaje;
+-- las de `estado = 'ok'` lo dejan en NULL. Migración idempotente (ADD COLUMN IF
+-- NOT EXISTS) y portable a los tres modos (`supabase-cloud`, `supabase-local`,
+-- `local-postgres`); no requiere `pg_cron`/`pg_net`.
+--
+-- Requisitos: 12.4, 12.5
+-- =============================================================================
+
+ALTER TABLE ingest_log ADD COLUMN IF NOT EXISTS error text;

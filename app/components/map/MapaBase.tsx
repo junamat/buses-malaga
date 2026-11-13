@@ -17,7 +17,7 @@
  * - 2.1, 2.2: pinta cada Bus en su posición con su `codLinea` y `sentido`.
  * - 2.3, 2.4: pinta las Paradas en sus coordenadas; al seleccionar una muestra
  *   su `nombre` legible y su `codParada`.
- * - 2.5: refresca las posiciones cada minuto con la captura más reciente (la
+ * - 2.5: refresca las posiciones cada 20 s con la captura más reciente (la
  *   API ya resuelve la captura más reciente por bus).
  * - 2.6: indica al usuario cuándo no hay buses que mostrar.
  * - 2.7: marca los datos obsoletos indicando su antigüedad.
@@ -105,9 +105,11 @@ import FilterPanel, { SENTIDOS_POR_DEFECTO } from "./FilterPanel";
 
 /**
  * Intervalo de refresco de las posiciones de buses, en milisegundos. Coincide
- * con la resolución de refresco de 1 minuto del sistema (Requisito 2.5 / 12.1).
+ * con la cadencia de ingesta de la API Navega (20 s,
+ * `INTERVALO_POSICIONES_NAVEGA_MS`); el Requisito 2.5 / 12.1 pide como mínimo
+ * un refresco por minuto.
  */
-const BUS_REFRESH_MS = 60_000;
+const BUS_REFRESH_MS = 20_000;
 
 /**
  * Sincroniza los gestos de pan/zoom de Leaflet con el estado puro (Requisito
@@ -209,7 +211,7 @@ function useBusStopLayers(): DataLayerState {
         // buses. Se omite silenciosamente y el resto del mapa sigue operativo.
       });
 
-    // Primera carga de buses inmediata y refresco cada minuto (Requisito 2.5).
+    // Primera carga de buses inmediata y refresco periódico (Requisito 2.5).
     void refrescarBuses();
     const timer = setInterval(() => {
       void refrescarBuses();
@@ -534,7 +536,7 @@ export default function MapaBase(): JSX.Element {
 function MapaContenido(): JSX.Element {
   const [state, setState] = useState<MapState>(buildInitialState);
 
-  // Capas de datos: paradas (estáticas) y buses (refresco de 1 min; Req 2.5).
+  // Capas de datos: paradas (estáticas) y buses (refresco de 20 s; Req 2.5).
   // Se cargan SIN filtrar: constituyen el conjunto base sobre el que la lógica
   // pura de `lib/filters.ts` aplica los filtros en el cliente (Requisito 3).
   const { buses, paradas, cargando, error } = useBusStopLayers();

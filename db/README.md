@@ -14,6 +14,7 @@ Se aplican en orden numérico ascendente.
 | `migrations/0003_route_directions_destinos.sql` | Tabla `route_directions` (Destino legible por `(route_id, sentido)`, FK → `routes`, unicidad por `(route_id, sentido)`). | Los tres (`supabase-cloud`, `supabase-local`, `local-postgres`) |
 | `migrations/0004_datos_usuario_rls.sql` | `favorites` (unicidad `NULLS NOT DISTINCT`) y `vehicle_contributions` con RLS por `auth.uid() = user_id` (lectura pública de aportaciones); `auth_login_attempts` para el bloqueo tras 5 fallos. Crea `anon`/`authenticated` y un `auth.uid()` compatible solo si no existen. | Los tres |
 | `migrations/0005_local_auth.sql` | Credenciales (`local_auth_users`) y sesiones (`local_auth_sessions`) del adaptador `local-auth`. | **Solo** `local-postgres` |
+| `migrations/0006_ingest_log_error.sql` | Columna `error` (NULL-able) en `ingest_log` para guardar la causa de los ciclos fallidos. Idempotente; en BDs nuevas ya la crea la 0001. | Los tres |
 
 ### Nota de portabilidad
 

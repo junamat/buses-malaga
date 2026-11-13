@@ -18,7 +18,7 @@
  * worker y los route handlers comparten un único pool de `pg`.
  */
 
-import type { IngestScheduler } from "@/lib/ports";
+import type { IngestResult, IngestScheduler } from "@/lib/ports";
 import { createIngestScheduler, loadBackendConfig } from "@/lib/config";
 import { getRepository } from "@/lib/apiRepository";
 
@@ -72,14 +72,30 @@ async function primerasEjecuciones(
     const { items } = await getRepository(env).listLineas({ limite: 1 });
     if (items.length === 0) {
       const gtfs = await scheduler.runOnce("gtfs");
-      console.info(`[ingest-worker] Recarga GTFS inicial: ${gtfs.estado}`);
+      logResultadoCiclo("Recarga GTFS inicial", gtfs);
     }
     const posiciones = await scheduler.runOnce("posiciones");
-    console.info(`[ingest-worker] Ingesta inicial de posiciones: ${posiciones.estado}`);
+    logResultadoCiclo("Ingesta inicial de posiciones", posiciones);
     await scheduler.runOnce("purga");
   } catch (error) {
     console.error("[ingest-worker] Fallo en las ejecuciones iniciales:", error);
   }
+}
+
+/**
+ * Registra en consola el resultado de un ciclo de arranque. Un ciclo `ok` se
+ * informa a nivel info; un `fallo` se registra a nivel error **con su causa**
+ * (`error`), de modo que un fallo intermitente (p. ej. timeout o HTTP no-2xx de
+ * la fuente, que el contrato trata preservando los datos previos) sea visible
+ * sin tener que consultar `ingest_log`.
+ */
+function logResultadoCiclo(etiqueta: string, resultado: IngestResult): void {
+  if (resultado.estado === "ok") {
+    console.info(`[ingest-worker] ${etiqueta}: ok`);
+    return;
+  }
+  const causa = resultado.error ?? "sin detalle";
+  console.error(`[ingest-worker] ${etiqueta}: fallo — ${causa}`);
 }
 
 /** Detiene y olvida el worker del proceso (pensado para tests). */

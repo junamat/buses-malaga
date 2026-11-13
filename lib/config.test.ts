@@ -13,7 +13,12 @@ import {
   createAuthProvider,
   createBackend,
   AdapterNotImplementedError,
+  POSICIONES_FUENTE_URL_DEFECTO,
+  buildLocalIngestConfig,
+  resolveFuenteDatos,
 } from "@/lib/config";
+import { recargarGtfs } from "@/lib/gtfs";
+import { cicloCalibracion } from "@/lib/calibrationCycle";
 
 const DB_URL = "postgresql://postgres:postgres@127.0.0.1:5432/buses_malaga";
 
@@ -121,6 +126,54 @@ describe("loadBackendConfig", () => {
       LOCAL_AUTH_DEV_USER: "false",
     });
     expect(cfg.devUserEnabled).toBe(false);
+  });
+});
+
+describe("fuente de datos (FUENTE_DATOS)", () => {
+  const envLocal = { BACKEND_PROVIDER: "local-postgres", DATABASE_URL: DB_URL };
+
+  it("usa la API Navega por defecto", () => {
+    expect(resolveFuenteDatos({})).toBe("navega");
+    expect(resolveFuenteDatos({ FUENTE_DATOS: "" })).toBe("navega");
+    expect(loadBackendConfig(envLocal).ingest?.fuenteDatos).toBe("navega");
+  });
+
+  it("admite volver a las fuentes de datos abiertos y rechaza valores desconocidos", () => {
+    expect(resolveFuenteDatos({ FUENTE_DATOS: "datos-abiertos" })).toBe(
+      "datos-abiertos",
+    );
+    expect(() => resolveFuenteDatos({ FUENTE_DATOS: "gtfs" })).toThrow(
+      /FUENTE_DATOS/,
+    );
+  });
+
+  it("con navega cablea los tres ciclos sobre la API (lector, topología y calibración)", () => {
+    const config = loadBackendConfig({
+      ...envLocal,
+      NAVEGA_BASE_URL: "https://navega.test/api",
+    });
+    const ingest = buildLocalIngestConfig(config);
+
+    expect(ingest.posiciones.fuenteUrl).toBe(
+      "https://navega.test/api/buses_servicios",
+    );
+    expect(ingest.posiciones.lector).toBeTypeOf("function");
+    expect(ingest.recargaGtfs).toBeTypeOf("function");
+    expect(ingest.recargaGtfs).not.toBe(recargarGtfs);
+    expect(ingest.calibracion).not.toBe(cicloCalibracion);
+  });
+
+  it("con datos-abiertos conserva el CSV, el GTFS y el scraping", () => {
+    const config = loadBackendConfig({
+      ...envLocal,
+      FUENTE_DATOS: "datos-abiertos",
+    });
+    const ingest = buildLocalIngestConfig(config);
+
+    expect(ingest.posiciones.fuenteUrl).toBe(POSICIONES_FUENTE_URL_DEFECTO);
+    expect(ingest.posiciones.lector).toBeUndefined();
+    expect(ingest.recargaGtfs).toBe(recargarGtfs);
+    expect(ingest.calibracion).toBe(cicloCalibracion);
   });
 });
 

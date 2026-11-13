@@ -41,7 +41,9 @@ import type { Repository } from "@/lib/ports";
 import {
   parsearPosiciones,
   type FilaDescartada,
+  type ResultadoParseo,
 } from "@/lib/normalize";
+import type { PosicionCaptura } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Constantes del contrato de ingesta
@@ -53,6 +55,27 @@ import {
  * no disponible para la ejecución y se conservan los datos previos.
  */
 export const TIMEOUT_POSICIONES_MS = 30_000;
+
+/**
+ * Número de intentos del fetch de la fuente de posiciones por ciclo (incluye el
+ * primero). Un valor de 2 aplica un único reintento: absorbe un fallo de red
+ * transitorio —típicamente un reset de una conexión keep-alive reutilizada por
+ * el `fetch` de Node, que es la causa más probable de los fallos intermitentes
+ * observados— sin convertir cada ciclo en varias peticiones a la fuente. El
+ * reintento solo afecta al fetch; el `INSERT` en la BD conserva un único intento
+ * (sus fallos no son transitorios de la misma forma). Si el reintento se agota,
+ * el contrato de fallo es idéntico al de siempre: se conservan los datos previos
+ * (Requisito 12.4) y se registra el error del último intento.
+ */
+export const INTENTOS_FETCH_POSICIONES = 2;
+
+/**
+ * Espera entre intentos del fetch de posiciones, en ms. Un respiro corto da
+ * tiempo a que el transporte abra una conexión nueva en lugar de reutilizar la
+ * socket caída, sin comprometer el presupuesto del ciclo (60 s). El timeout de
+ * {@link TIMEOUT_POSICIONES_MS} se aplica **por intento**, igual que antes.
+ */
+export const BACKOFF_FETCH_POSICIONES_MS = 250;
 
 /**
  * Ventana de retención por defecto de las posiciones crudas, en segundos
@@ -81,18 +104,62 @@ export interface IngestDeps {
   repository: Repository;
   /** Reloj inyectable (ISO-8601). Por defecto, la hora del sistema. */
   now?: () => Date;
+  /**
+   * Espera inyectable entre reintentos del fetch (ms). Por defecto usa
+   * `setTimeout`; los tests la sustituyen por un no-op para no introducir
+   * esperas reales ni temporizadores pendientes.
+   */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
 // Ciclo de posiciones (cada 60 s)
 // ---------------------------------------------------------------------------
 
+/**
+ * Lector de la fuente de posiciones: recupera el recurso por el transporte y lo
+ * normaliza a `PosicionCaptura`, separando los registros descartados. Es el
+ * punto por el que se enchufa una fuente distinta del CSV de datos abiertos
+ * (p. ej. la API Navega, `lib/navega.ts`) sin tocar el ciclo: el reintento, el
+ * timeout por intento y el contrato de fallo son los mismos para todas.
+ *
+ * Debe **lanzar** si la fuente no responde o su respuesta no es interpretable
+ * (el ciclo lo convierte en `estado: "fallo"` conservando los datos previos), y
+ * **no** lanzar por registros sueltos malformados: esos van a `descartadas`.
+ */
+export type LectorPosiciones = (
+  transport: HttpTransport,
+  /** Instante de ingesta (ISO-8601) a asignar a las capturas. */
+  capturedAt: string,
+  /** Timeout por petición, en ms. */
+  timeoutMs: number,
+) => Promise<ResultadoParseo>;
+
 /** Opciones del ciclo de ingesta de posiciones. */
 export interface IngestPosicionesOpciones {
-  /** URL del CSV de posiciones (`lineasyubicaciones.csv`). */
+  /**
+   * URL de la fuente de posiciones. Con el lector por defecto es el CSV
+   * `lineasyubicaciones.csv`; con un {@link LectorPosiciones} propio es además
+   * el nombre con el que el ciclo se registra en `ingest_log`.
+   */
   fuenteUrl: string;
+  /**
+   * Lector de la fuente. Por defecto, el del CSV de datos abiertos sobre
+   * `fuenteUrl` ({@link crearLectorPosicionesCsv}).
+   */
+  lector?: LectorPosiciones;
   /** Timeout de la petición, en ms. Por defecto {@link TIMEOUT_POSICIONES_MS}. */
   timeoutMs?: number;
+  /**
+   * Intentos del fetch (incluye el primero). Por defecto
+   * {@link INTENTOS_FETCH_POSICIONES}. Un valor ≤ 1 desactiva el reintento.
+   */
+  intentos?: number;
+  /**
+   * Espera entre intentos, en ms. Por defecto
+   * {@link BACKOFF_FETCH_POSICIONES_MS}.
+   */
+  backoffMs?: number;
 }
 
 /**
@@ -113,11 +180,19 @@ export interface ResultadoIngestaPosiciones {
  * Ejecuta el ciclo de ingesta de posiciones: recupera el CSV por el transporte
  * inyectado, normaliza y descarta filas malformadas, e inserta las válidas.
  *
+ * Resiliencia (fallos transitorios de red): el fetch de la fuente se reintenta
+ * de forma acotada ({@link INTENTOS_FETCH_POSICIONES} intentos con una espera
+ * de {@link BACKOFF_FETCH_POSICIONES_MS}) para absorber un fallo aislado —p. ej.
+ * el reset de una conexión keep-alive reutilizada por el `fetch` de Node— sin
+ * multiplicar las peticiones a la fuente. El reintento cubre solo el fetch; el
+ * `INSERT` en la BD mantiene un único intento.
+ *
  * Contrato de errores (Requisitos 12.4, 12.5): si la fuente no responde dentro
- * del timeout o falla por cualquier motivo, **no se modifica nada** en la BD y
- * se devuelve un `IngestResult` con `estado: "fallo"`, la `fuente` afectada y
- * el `error`, para que el llamador lo escriba en `ingest_log`. Nunca lanza por
- * un fallo de fuente.
+ * del timeout (por intento) o falla por cualquier motivo en **todos** los
+ * intentos, **no se modifica nada** en la BD y se devuelve un `IngestResult`
+ * con `estado: "fallo"`, la `fuente` afectada y el `error` del último intento,
+ * para que el llamador lo escriba en `ingest_log`. Nunca lanza por un fallo de
+ * fuente.
  *
  * Las filas malformadas no interrumpen la ingesta de las válidas: se recogen en
  * `descartadas` (Requisito 12.3) y se insertan igualmente las filas correctas.
@@ -130,12 +205,27 @@ export async function ingerirPosiciones(
   const runAt = ahora.toISOString();
   const { fuenteUrl } = opciones;
   const timeoutMs = opciones.timeoutMs ?? TIMEOUT_POSICIONES_MS;
+  const intentos = opciones.intentos ?? INTENTOS_FETCH_POSICIONES;
+  const backoffMs = opciones.backoffMs ?? BACKOFF_FETCH_POSICIONES_MS;
+  const sleep = deps.sleep ?? sleepPorDefecto;
+  const lector = opciones.lector ?? crearLectorPosicionesCsv(fuenteUrl);
 
-  // 1. Recuperar el cuerpo de la fuente. Un fallo aquí (timeout/error/fuente
-  //    no disponible) preserva los datos previos: no se toca la BD.
-  let cuerpo: string;
+  // 1. Recuperar y normalizar la fuente con el lector (CSV por defecto), con un
+  //    reintento acotado ante fallos transitorios de red (p. ej. reset de una
+  //    conexión keep-alive reutilizada por `fetch`). El timeout se aplica por
+  //    intento. Las coordenadas salen numéricas [lon, lat] y los registros
+  //    malformados, separados. Si todos los intentos fallan, se preserva lo
+  //    previo (no se toca la BD) y se reporta el error del último intento
+  //    (Requisito 12.4).
+  let validas: PosicionCaptura[];
+  let descartadas: FilaDescartada[];
   try {
-    cuerpo = await deps.transport.get(fuenteUrl, timeoutMs);
+    ({ validas, descartadas } = await recuperarConReintento(
+      () => lector(deps.transport, runAt, timeoutMs),
+      intentos,
+      backoffMs,
+      sleep,
+    ));
   } catch (error) {
     return {
       resultado: resultadoFallo("posiciones", fuenteUrl, error, runAt),
@@ -144,12 +234,7 @@ export async function ingerirPosiciones(
     };
   }
 
-  // 2. Normalizar/parsear reutilizando lib/normalize.ts. Las coordenadas se
-  //    convierten a numérico [lon, lat] y las filas malformadas se separan.
-  const filas = parsearLineasCsv(cuerpo);
-  const { validas, descartadas } = parsearPosiciones(filas, runAt);
-
-  // 3. Persistir las filas válidas. Un fallo de escritura también se reporta
+  // 2. Persistir las filas válidas. Un fallo de escritura también se reporta
   //    como fallo del ciclo (sin propagar excepción al disparador).
   try {
     if (validas.length > 0) {
@@ -301,6 +386,21 @@ export async function ejecutarIngesta(
 }
 
 // ---------------------------------------------------------------------------
+// Lector por defecto: CSV de datos abiertos
+// ---------------------------------------------------------------------------
+
+/**
+ * Lector de posiciones del CSV `lineasyubicaciones.csv` del portal de datos
+ * abiertos: descarga el cuerpo y lo normaliza con `lib/normalize.ts`.
+ */
+export function crearLectorPosicionesCsv(fuenteUrl: string): LectorPosiciones {
+  return async (transport, capturedAt, timeoutMs) => {
+    const cuerpo = await transport.get(fuenteUrl, timeoutMs);
+    return parsearPosiciones(parsearLineasCsv(cuerpo), capturedAt);
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Helpers internos (puros / sin I/O propio)
 // ---------------------------------------------------------------------------
 
@@ -339,6 +439,42 @@ function desentrecomillar(campo: string): string {
     return t.slice(1, -1);
   }
   return t;
+}
+
+/**
+ * Ejecuta `operacion` hasta `intentos` veces, esperando `backoffMs` entre
+ * intentos fallidos. Devuelve el primer resultado correcto; si todos fallan,
+ * relanza el error del **último** intento (el más representativo del estado
+ * actual de la fuente). Un `intentos ≤ 1` ejecuta una sola vez (sin reintento).
+ *
+ * No discrimina el tipo de error: a este nivel cualquier excepción del
+ * transporte es un fallo de fuente candidato a un reintento acotado, y el
+ * contrato de arriba ya preserva los datos previos si el reintento se agota.
+ */
+async function recuperarConReintento<T>(
+  operacion: () => Promise<T>,
+  intentos: number,
+  backoffMs: number,
+  sleep: (ms: number) => Promise<void>,
+): Promise<T> {
+  const total = Math.max(1, intentos);
+  let ultimoError: unknown;
+  for (let intento = 1; intento <= total; intento++) {
+    try {
+      return await operacion();
+    } catch (error) {
+      ultimoError = error;
+      if (intento < total && backoffMs > 0) {
+        await sleep(backoffMs);
+      }
+    }
+  }
+  throw ultimoError;
+}
+
+/** Espera por defecto entre reintentos (sustituible en tests vía `IngestDeps`). */
+function sleepPorDefecto(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** Construye un `IngestResult` de fallo con la fuente y el mensaje de error. */

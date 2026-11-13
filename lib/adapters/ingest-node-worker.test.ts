@@ -103,6 +103,39 @@ describe("NodeFetchTransport", () => {
   });
 });
 
+describe("NodeFetchTransport (hosts con certificado intermedio extra)", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("no usa fetch para esos hosts y reporta el fallo de red con la URL y el código", async () => {
+    const fetchDoble = vi.fn();
+    globalThis.fetch = fetchDoble as unknown as typeof fetch;
+
+    // Puerto 1 de loopback: la conexión se rechaza sin salir de la máquina.
+    const url = "https://127.0.0.1:1/api/lineas";
+    const transporte = new NodeFetchTransport({ "127.0.0.1": "" });
+
+    await expect(transporte.get(url, 5_000)).rejects.toThrow(
+      /Fallo al recuperar la fuente "https:\/\/127\.0\.0\.1:1\/api\/lineas": ECONNREFUSED/,
+    );
+    expect(fetchDoble).not.toHaveBeenCalled();
+  });
+
+  it("sigue usando fetch para el resto de hosts y para http sin TLS", async () => {
+    const fetchDoble = vi.fn(async () => new Response("ok", { status: 200 }));
+    globalThis.fetch = fetchDoble as unknown as typeof fetch;
+
+    const transporte = new NodeFetchTransport({ "navega.test": "" });
+    await transporte.get("https://datos/x.csv");
+    await transporte.get("http://navega.test/api/lineas");
+
+    expect(fetchDoble).toHaveBeenCalledTimes(2);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // NodeWorkerIngestScheduler.runOnce
 // ---------------------------------------------------------------------------

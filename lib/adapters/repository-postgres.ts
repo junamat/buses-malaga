@@ -393,9 +393,10 @@ export function buildFindParadaSql(codParada: CodParada): SqlStatement {
  *   medida en `geography`). Solo cuenta si la parada va **por delante** del bus
  *   en el sentido del recorrido (`frac_parada >= frac_bus`); si el bus ya pasó
  *   la parada, la distancia es `NULL` y la lógica de `lib/eta.ts` lo descarta.
- * - `velocidad_ms`: velocidad media del bus inferida de sus dos últimas capturas
+ * - `velocidad_ms`: velocidad media del bus inferida de su última captura y de
+ *   la más reciente que sea al menos {@link BASE_VELOCIDAD_SEGUNDOS} anterior
  *   (distancia geodésica entre ellas / diferencia de `last_update` en segundos).
- *   `NULL`/0 si no hay dos capturas o no transcurrió tiempo.
+ *   `NULL`/0 si no hay captura de referencia o no transcurrió tiempo.
  * - `antiguedad_segundos`: antigüedad de la última posición respecto a `now()`.
  *
  * La selección del ETA mínimo, la cota de 60 min, el redondeo a minutos enteros
@@ -404,7 +405,8 @@ export function buildFindParadaSql(codParada: CodParada): SqlStatement {
  * consulta **no** lee `official_minutes` (Requisito 5.4, Property 16).
  *
  * `$1` = `cod_parada`, `$2` = ventana de servicio en segundos, `$3` = umbral de
- * obsolescencia en segundos (los buses más antiguos ni se consideran).
+ * obsolescencia en segundos (los buses más antiguos ni se consideran), `$4` =
+ * separación mínima entre las capturas de la velocidad.
  */
 export function buildEtaObservacionesSql(codParada: CodParada): SqlStatement {
   return {
@@ -434,7 +436,15 @@ capturas AS (
     AND bp.captured_at >= ui.ts - make_interval(secs => $2)
 ),
 actual AS (SELECT * FROM capturas WHERE rn = 1),
-previa AS (SELECT * FROM capturas WHERE rn = 2),
+-- Captura de referencia para la velocidad: la más reciente que sea al menos
+-- $4 segundos anterior a la actual (no simplemente la penúltima).
+previa AS (
+  SELECT DISTINCT ON (c.cod_bus) c.*
+  FROM capturas c
+  JOIN actual a ON a.cod_bus = c.cod_bus
+  WHERE c.last_update <= a.last_update - make_interval(secs => $4)
+  ORDER BY c.cod_bus, c.last_update DESC, c.captured_at DESC
+),
 candidatos AS (
   SELECT
     a.cod_bus,
@@ -489,9 +499,27 @@ CROSS JOIN parada pa
 LEFT JOIN shapes s ON s.route_id = c.cod_linea AND s.sentido = c.sentido
 WHERE c.antiguedad_segundos <= $3
 `,
-    params: [codParada, VENTANA_SERVICIO_SEGUNDOS, UMBRAL_OBSOLETO_SEGUNDOS],
+    params: [
+      codParada,
+      VENTANA_SERVICIO_SEGUNDOS,
+      UMBRAL_OBSOLETO_SEGUNDOS,
+      BASE_VELOCIDAD_SEGUNDOS,
+    ],
   };
 }
+
+/**
+ * Separación mínima (en segundos) entre las dos capturas con las que se infiere
+ * la velocidad de un bus en el ETA.
+ *
+ * Con la API Navega las posiciones se ingieren cada 20 s, y entre dos capturas
+ * tan seguidas un bus parado en un semáforo o en una parada —o cuya posición la
+ * fuente aún no ha refrescado— da velocidad 0, lo que dejaría el ETA "no
+ * disponible" a ratos. Medir sobre ~1 minuto promedia esas paradas. 45 s elige
+ * la captura de hace 60 s con sondeo de 20 s, y la penúltima con sondeo de 60 s
+ * (el comportamiento que ya tenía el CSV de datos abiertos).
+ */
+export const BASE_VELOCIDAD_SEGUNDOS = 45;
 
 /**
  * SQL de `insertMinutosOficiales`: inserción múltiple en `official_minutes` vía
@@ -1031,19 +1059,23 @@ export function buildCreateAportacionSql(
 
 /**
  * SQL de `logIngesta`: inserta una fila en `ingest_log` con la fuente, el
- * estado (`ok`/`fallo`) y el instante de ejecución (`run_at`). La columna
- * `fuente` es `NOT NULL` en el esquema; cuando el `IngestResult` no la aporta
- * (p. ej. el ciclo de purga, que no tiene fuente externa) se usa el nombre del
- * `job` como fuente, de modo que el registro siga identificando el ciclo
- * afectado (Requisito 12.5). `run_at` se toma del propio resultado para que el
- * instante coincida con la ejecución del ciclo.
+ * estado (`ok`/`fallo`), el mensaje de error (cuando falla) y el instante de
+ * ejecución (`run_at`). La columna `fuente` es `NOT NULL` en el esquema; cuando
+ * el `IngestResult` no la aporta (p. ej. el ciclo de purga, que no tiene fuente
+ * externa) se usa el nombre del `job` como fuente, de modo que el registro siga
+ * identificando el ciclo afectado (Requisito 12.5). El `error` se persiste solo
+ * cuando el ciclo falla —`null` en caso contrario— para que un fallo
+ * intermitente de fuente sea diagnosticable a posteriori sin reproducirlo
+ * (Requisito 12.4). `run_at` se toma del propio resultado para que el instante
+ * coincida con la ejecución del ciclo.
  */
 export function buildLogIngestaSql(result: IngestResult): SqlStatement {
   const fuente = result.fuente ?? result.job;
   return {
     text:
-      "INSERT INTO ingest_log (fuente, estado, run_at) VALUES ($1, $2, $3)",
-    params: [fuente, result.estado, result.runAt],
+      "INSERT INTO ingest_log (fuente, estado, error, run_at) " +
+      "VALUES ($1, $2, $3, $4)",
+    params: [fuente, result.estado, result.error ?? null, result.runAt],
   };
 }
 

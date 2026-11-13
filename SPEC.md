@@ -7,6 +7,29 @@ La EMT cuenta con aplicaciones para iOS, Android y una aplicación web compatibl
 
 ### Recursos
 
+#### 0. API Navega de la EMT (fuente principal)
+
+Desde noviembre de 2026 la fuente por defecto es la API que usa el front "Líneas y
+Horarios" de la propia EMT, `https://navega.emtmalaga.es/api/`. No está documentada
+oficialmente y se declara "en desarrollo"; su mapa (endpoints, campos, enumerados)
+está en [`docs/api-navega.md`](docs/api-navega.md) y el acceso queda aislado en
+`lib/navega.ts`. Sustituye a las tres fuentes que se describen más abajo:
+
+| Necesidad | Fuente anterior | API Navega |
+|---|---|---|
+| Posiciones en tiempo real | CSV `lineasyubicaciones.csv` (cada 1 min) | `buses_servicios` (caché de 10 s; se sondea cada 20 s) |
+| Líneas, paradas y recorridos | GTFS en CSV (`routes`, `trips`, `stop_times`, `shapes`) | `lineas`, `paradas`, `rutas` (+ `rutasPrevistas`/`rutasActivas` para saber qué rutas operan) |
+| Minutos oficiales para calibrar | Scraping de `informacionParada.html` | `estimaciones` (JSON, con la línea de cada estimación) |
+
+Ventajas: datos más frescos, estado real del vehículo (deslocalizado, sin
+comunicación, en cocheras…), solo las rutas que operan en la jornada y una sola
+petición por ciclo. Los identificadores coinciden con los de las fuentes anteriores
+(`vehicleId` = `codBus`, `lineId` = `codLinea`, `codPar` = código de parada), así que
+el modelo interno no cambia.
+
+Las fuentes de datos abiertos siguen soportadas como respaldo
+(`FUENTE_DATOS=datos-abiertos`), y el resto de esta sección las describe.
+
 Todas las fuentes de datos abiertos provienen del portal del Ayuntamiento de Málaga
 (<https://datosabiertos.malaga.eu/>), grupo *Transporte*. Salvo que se indique lo
 contrario, se publican bajo licencia de datos abiertos del Ayuntamiento y no
@@ -139,10 +162,12 @@ ESTÁTICO (descarga diaria)        TIEMPO REAL (polling 1 min)       REFERENCIA 
 
 ### Estrategia de estimación de llegada
 
-No existe GTFS-Realtime ni ninguna API de ETA abierta de la EMT: solo hay posiciones
-vivas (1 min) y horarios teóricos (GTFS). Las estimaciones oficiales existen pero
-solo en HTML renderizado. Por tanto, **la estimación se construye a medida**, que es
-el principal punto donde esta app busca superar a la oficial.
+No existe GTFS-Realtime ni ninguna API de ETA **documentada** de la EMT. Las
+estimaciones oficiales existen en la web móvil (HTML) y en el endpoint `estimaciones`
+de la API Navega, pero ambos son no oficiales y se usan solo como referencia. Por
+tanto, **la estimación se construye a medida** a partir de las posiciones vivas y la
+geometría de los recorridos, que es el principal punto donde esta app busca superar
+a la oficial.
 
 Enfoque híbrido:
 
@@ -154,16 +179,19 @@ Enfoque híbrido:
    del shape hasta cada parada siguiente → ETA.
 3. **Ajuste por incidencias (fase 2)** — los cortes de tráfico sobre el recorrido
    permiten marcar posibles retrasos/desvíos.
-4. **Calibración** — los minutos oficiales (scraping de `informacionParada.html`) se
-   usan como verdad de referencia para validar y afinar el estimador, no como fuente
-   de producción.
+4. **Calibración** — los minutos oficiales (`estimaciones` de la API Navega; antes,
+   scraping de `informacionParada.html`) se usan como verdad de referencia para
+   validar y afinar el estimador, no como fuente de producción.
 
 Limitaciones conocidas:
 
-- El refresco de 1 minuto acota la precisión del ETA; entre capturas la posición del
-  bus "salta". Para el display puede interpolarse la posición a lo largo del shape.
+- El refresco (20 s con la API Navega, 1 minuto con el CSV) acota la precisión del
+  ETA; entre capturas la posición del bus "salta". Para el display puede
+  interpolarse la posición a lo largo del shape.
 - Ninguna fuente de posiciones trae velocidad ni rumbo por vehículo; hay que
-  inferirlos comparando capturas consecutivas con el `last_update` del CSV.
+  inferirlos comparando capturas separadas ~1 minuto. La API Navega tampoco trae
+  marca temporal por vehículo (el CSV sí: `last_update`), así que se usa el instante
+  de ingesta.
 - No se conoce el método interno con que la EMT calcula sus minutos oficiales (GPS
   vivo vs. interpolación de horario); conviene muestrear una parada en el tiempo para
   caracterizarlo antes de confiar en él como baseline.

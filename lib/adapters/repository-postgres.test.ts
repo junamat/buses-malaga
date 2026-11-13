@@ -35,6 +35,7 @@ import {
   mapObservacionBus,
   buildListBusesSql,
   VENTANA_SERVICIO_SEGUNDOS,
+  BASE_VELOCIDAD_SEGUNDOS,
   buildInsertPosicionesSql,
   buildPurgePosicionesSql,
   buildListFavoritosSql,
@@ -492,7 +493,7 @@ describe("construcción de SQL", () => {
     expect(params).toEqual(["u1", 900, "lleno"]);
   });
 
-  it("buildLogIngestaSql registra fuente, estado y run_at", () => {
+  it("buildLogIngestaSql registra fuente, estado, error y run_at", () => {
     const { text, params } = buildLogIngestaSql({
       job: "posiciones",
       estado: "ok",
@@ -500,10 +501,28 @@ describe("construcción de SQL", () => {
       runAt: "2024-01-01T00:00:00.000Z",
     });
     expect(text).toContain("INSERT INTO ingest_log");
-    expect(text).toContain("(fuente, estado, run_at)");
+    expect(text).toContain("(fuente, estado, error, run_at)");
+    // Un ciclo ok no lleva mensaje de error: la columna queda en NULL.
     expect(params).toEqual([
       "https://datos/lineasyubicaciones.csv",
       "ok",
+      null,
+      "2024-01-01T00:00:00.000Z",
+    ]);
+  });
+
+  it("buildLogIngestaSql persiste el mensaje de error cuando el ciclo falla", () => {
+    const { params } = buildLogIngestaSql({
+      job: "posiciones",
+      estado: "fallo",
+      fuente: "https://datos/lineasyubicaciones.csv",
+      error: "Timeout de 30000 ms al recuperar la fuente.",
+      runAt: "2024-01-01T00:00:00.000Z",
+    });
+    expect(params).toEqual([
+      "https://datos/lineasyubicaciones.csv",
+      "fallo",
+      "Timeout de 30000 ms al recuperar la fuente.",
       "2024-01-01T00:00:00.000Z",
     ]);
   });
@@ -515,7 +534,7 @@ describe("construcción de SQL", () => {
       runAt: "2024-01-01T00:00:00.000Z",
     });
     // La columna `fuente` es NOT NULL; sin fuente externa se registra el job.
-    expect(params).toEqual(["purga", "ok", "2024-01-01T00:00:00.000Z"]);
+    expect(params).toEqual(["purga", "ok", null, "2024-01-01T00:00:00.000Z"]);
   });
 });
 
@@ -654,6 +673,7 @@ describe("PostgresRepository", () => {
     expect(calls[0].params).toEqual([
       "https://datos/lineasyubicaciones.csv",
       "fallo",
+      "timeout",
       "2024-01-01T00:00:00.000Z",
     ]);
   });
@@ -695,6 +715,14 @@ describe("buildEtaObservacionesSql", () => {
     expect(sql.params[1]).toBe(VENTANA_SERVICIO_SEGUNDOS);
     // El tercer parámetro es el umbral de obsolescencia (120 s).
     expect(sql.params[2]).toBe(120);
+    // El cuarto, la separación mínima entre las capturas de la velocidad.
+    expect(sql.params[3]).toBe(BASE_VELOCIDAD_SEGUNDOS);
+  });
+
+  it("mide la velocidad contra una captura separada, no contra la penúltima", () => {
+    const sql = buildEtaObservacionesSql("590");
+    expect(sql.text).toContain("a.last_update - make_interval(secs => $4)");
+    expect(sql.text).not.toContain("rn = 2");
   });
 
   it("usa map-matching PostGIS y NO lee official_minutes (Property 16)", () => {

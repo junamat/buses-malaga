@@ -35,12 +35,20 @@ import {
   createPostgresLoginAttemptStore,
 } from "@/lib/adapters/auth-store-postgres";
 import {
+  INTERVALO_POSICIONES_NAVEGA_MS,
   NodeWorkerIngestScheduler,
   type IntervalosWorker,
 } from "@/lib/adapters/ingest-node-worker";
 import type { IngestConfig } from "@/lib/ingest";
 import { recargarGtfs } from "@/lib/gtfs";
 import { cicloCalibracion } from "@/lib/calibrationCycle";
+import {
+  NAVEGA_BASE_URL_DEFECTO,
+  crearCicloCalibracionNavega,
+  crearLectorPosicionesNavega,
+  crearRecargaTopologiaNavega,
+  urlBusesServicios,
+} from "@/lib/navega";
 
 // ---------------------------------------------------------------------------
 // Modo de backend
@@ -119,7 +127,14 @@ export interface BackendConfig {
    * `supabase-*`, donde la ingesta la programa `pg_cron`/`pg_net`.
    */
   ingest?: {
-    /** URL del CSV de posiciones (`lineasyubicaciones.csv`). */
+    /** Origen de los datos de la EMT (`FUENTE_DATOS`). Ver {@link FuenteDatos}. */
+    fuenteDatos: FuenteDatos;
+    /** Base de la API Navega (`NAVEGA_BASE_URL`). Solo con `fuenteDatos: "navega"`. */
+    navegaBaseUrl?: string;
+    /**
+     * URL del CSV de posiciones (`lineasyubicaciones.csv`). Solo se usa con
+     * `fuenteDatos: "datos-abiertos"`.
+     */
     posicionesFuenteUrl: string;
     /** Periodo del worker de posiciones/purga en ms (opcional). */
     pollIntervalMs?: number;
@@ -132,9 +147,51 @@ export interface BackendConfig {
 }
 
 /**
+ * Origen de los datos de la EMT que alimenta los ciclos de ingesta:
+ *
+ * - `navega` (por defecto): la API Navega de la EMT (`lib/navega.ts`). Una sola
+ *   fuente para posiciones (`buses_servicios`), topología (`lineas`, `paradas`,
+ *   `rutas`) y calibración (`estimaciones`), más fresca que las anteriores.
+ * - `datos-abiertos`: las fuentes originales (CSV de posiciones y GTFS del
+ *   portal de datos abiertos, y scraping de la web móvil para calibrar). Se
+ *   conserva como respaldo porque la EMT declara Navega "en desarrollo y no
+ *   estable": si cambia o deja de responder, basta con cambiar esta variable.
+ *
+ * Los identificadores (`codBus`, `codLinea`, `codParada`, `sentido`) son los
+ * mismos en ambas, así que se puede alternar sin migrar datos; conviene lanzar
+ * una recarga `gtfs` tras el cambio para alinear líneas y recorridos.
+ */
+export const FUENTES_DATOS = ["navega", "datos-abiertos"] as const;
+
+export type FuenteDatos = (typeof FUENTES_DATOS)[number];
+
+/** Fuente de datos cuando `FUENTE_DATOS` no está definida. */
+export const FUENTE_DATOS_DEFECTO: FuenteDatos = "navega";
+
+/**
+ * Resuelve `FUENTE_DATOS`. Sin definir usa {@link FUENTE_DATOS_DEFECTO}; un
+ * valor presente pero desconocido es un error de configuración.
+ */
+export function resolveFuenteDatos(
+  env: Record<string, string | undefined> = process.env,
+): FuenteDatos {
+  const raw = env.FUENTE_DATOS;
+  if (raw === undefined || raw === "") {
+    return FUENTE_DATOS_DEFECTO;
+  }
+  if (!(FUENTES_DATOS as readonly string[]).includes(raw)) {
+    throw new Error(
+      `FUENTE_DATOS inválido: "${raw}". ` +
+        `Valores admitidos: ${FUENTES_DATOS.join(", ")}.`,
+    );
+  }
+  return raw as FuenteDatos;
+}
+
+/**
  * URL por defecto del CSV de posiciones de la EMT en el portal de datos
- * abiertos de Málaga (ver `SPEC.md`). Se usa en `local-postgres` cuando
- * `POSICIONES_FUENTE_URL` no está definida.
+ * abiertos de Málaga (ver `SPEC.md`). Se usa en `local-postgres` con
+ * `FUENTE_DATOS=datos-abiertos` cuando `POSICIONES_FUENTE_URL` no está definida.
  */
 export const POSICIONES_FUENTE_URL_DEFECTO =
   "https://datosabiertos.malaga.eu/recursos/transporte/EMT/EMTlineasUbicaciones/lineasyubicaciones.csv";
@@ -187,6 +244,10 @@ export function loadBackendConfig(
     databaseUrl,
     devUserEnabled: env.LOCAL_AUTH_DEV_USER !== "false",
     ingest: {
+      fuenteDatos: resolveFuenteDatos(env),
+      ...(env.NAVEGA_BASE_URL !== undefined && env.NAVEGA_BASE_URL !== ""
+        ? { navegaBaseUrl: env.NAVEGA_BASE_URL }
+        : {}),
       posicionesFuenteUrl:
         env.POSICIONES_FUENTE_URL && env.POSICIONES_FUENTE_URL !== ""
           ? env.POSICIONES_FUENTE_URL
@@ -287,6 +348,10 @@ export function createIngestScheduler(
       if (config.ingest?.pollIntervalMs !== undefined) {
         intervalos.posicionesMs = config.ingest.pollIntervalMs;
         intervalos.purgaMs = config.ingest.pollIntervalMs;
+      } else if (config.ingest?.fuenteDatos === "navega") {
+        // Navega publica posiciones nuevas cada ~10 s (el CSV, cada minuto):
+        // se sondea más a menudo. La purga mantiene su cadencia de 60 s.
+        intervalos.posicionesMs = INTERVALO_POSICIONES_NAVEGA_MS;
       }
       return new NodeWorkerIngestScheduler({
         repository,
@@ -301,12 +366,31 @@ export function createIngestScheduler(
 
 /**
  * Construye la `IngestConfig` del modo `local-postgres` a partir de la config
- * resuelta: la fuente de posiciones (URL del CSV), la ventana de purga por
- * defecto, la recarga GTFS compartida de `lib/gtfs.ts` y el ciclo de calibración
- * de `lib/calibrationCycle.ts` (tarea 8.2). Con la calibración conectada, el
- * worker `node-worker` programa su temporizador de muestreo.
+ * resuelta, según la {@link FuenteDatos} elegida:
+ *
+ * - `navega`: los tres ciclos salen de la API Navega (`lib/navega.ts`):
+ *   posiciones de `buses_servicios`, datos estáticos de `lineas`/`paradas`/
+ *   `rutas` y calibración de `estimaciones`.
+ * - `datos-abiertos`: el CSV de posiciones, la recarga GTFS de `lib/gtfs.ts` y
+ *   el scraping de `lib/calibrationCycle.ts` (tarea 8.2).
+ *
+ * En ambos casos la ventana de purga es la de por defecto y, con la
+ * calibración conectada, el worker `node-worker` programa su temporizador de
+ * muestreo.
  */
 export function buildLocalIngestConfig(config: BackendConfig): IngestConfig {
+  if ((config.ingest?.fuenteDatos ?? FUENTE_DATOS_DEFECTO) === "navega") {
+    const baseUrl = config.ingest?.navegaBaseUrl ?? NAVEGA_BASE_URL_DEFECTO;
+    return {
+      posiciones: {
+        fuenteUrl: urlBusesServicios(baseUrl),
+        lector: crearLectorPosicionesNavega({ baseUrl }),
+      },
+      recargaGtfs: crearRecargaTopologiaNavega({ baseUrl }),
+      calibracion: crearCicloCalibracionNavega({ baseUrl }),
+    };
+  }
+
   const posicionesFuenteUrl =
     config.ingest?.posicionesFuenteUrl ?? POSICIONES_FUENTE_URL_DEFECTO;
   return {

@@ -19,13 +19,20 @@
 
 /** Los cuatro ciclos de ingesta definidos en el diseño. */
 export type IngestJob =
-  /** Posiciones de buses desde el CSV (cada 60 s). */
+  /**
+   * Posiciones de buses: `buses_servicios` de la API Navega (cada 20 s) o el
+   * CSV de datos abiertos (cada 60 s), según `FUENTE_DATOS`.
+   */
   | "posiciones"
-  /** Recarga de datos estáticos GTFS + nombres legibles (cada 24 h). */
+  /**
+   * Recarga de datos estáticos (líneas, paradas, recorridos) cada 24 h: la
+   * topología de la API Navega o el GTFS de datos abiertos. Conserva el nombre
+   * `gtfs` porque el modelo interno y las tablas siguen siendo las del GTFS.
+   */
   | "gtfs"
   /** Purga de posiciones crudas fuera de la ventana de retención (cada 60 s). */
   | "purga"
-  /** Scraping de minutos oficiales para calibración (intervalo de muestreo). */
+  /** Muestreo de minutos oficiales para calibración (intervalo de muestreo). */
   | "calibracion";
 
 /**

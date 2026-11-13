@@ -131,13 +131,16 @@ CREATE TABLE IF NOT EXISTS official_minutes (
 CREATE INDEX IF NOT EXISTS idx_official_minutes_parada_linea
     ON official_minutes (cod_parada, cod_linea);
 
--- `ingest_log` — registro de ejecuciones de ingesta: fuente, estado (ok/fallo)
--- e instante de ejecución (Requisito 12.5). Un fallo de fuente queda aquí
--- registrado sin alterar los datos previos.
+-- `ingest_log` — registro de ejecuciones de ingesta: fuente, estado (ok/fallo),
+-- mensaje de error (cuando falla) e instante de ejecución (Requisito 12.5). Un
+-- fallo de fuente queda aquí registrado —con su causa en `error`— sin alterar
+-- los datos previos, de modo que un fallo intermitente sea diagnosticable a
+-- posteriori sin tener que reproducirlo.
 CREATE TABLE IF NOT EXISTS ingest_log (
     id      bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     fuente  text NOT NULL,
     estado  text NOT NULL,
+    error   text,
     run_at  timestamptz NOT NULL DEFAULT now()
 );
 

@@ -21,7 +21,8 @@ proveedores de autenticación. Implementados a partir de la tarea 1.3.
   `IngestScheduler` para el modo `local-postgres`. `NodeFetchTransport` es el
   transporte HTTP sobre el `fetch` global de Node con timeout de 30 s por
   `AbortController` (reemplazo de `pg_net`). `NodeWorkerIngestScheduler` dispara
-  los cuatro ciclos con `setInterval` (posiciones/purga cada 60 s, GTFS cada
+  los cuatro ciclos con `setInterval` (posiciones cada 20 s con la API Navega o
+  60 s con datos abiertos, purga cada 60 s, GTFS cada
   24 h, calibración en su intervalo de muestreo cuando exista) y expone
   `runOnce` para el disparo bajo demanda de `POST /api/ingest`. El núcleo de la
   ingesta es compartido (`lib/ingest.ts` + `lib/gtfs.ts`); `runOnce` delega en

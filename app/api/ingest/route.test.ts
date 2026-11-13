@@ -54,6 +54,7 @@ function configDoble(provider: BackendProvider): BackendConfig {
     databaseUrl: "postgresql://postgres:postgres@127.0.0.1:5432/buses_malaga",
     devUserEnabled: true,
     ingest: {
+      fuenteDatos: "datos-abiertos",
       posicionesFuenteUrl: "https://datos/lineasyubicaciones.csv",
       workerEnabled: false,
     },

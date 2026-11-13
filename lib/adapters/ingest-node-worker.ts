@@ -38,11 +38,18 @@ import type {
   IngestScheduler,
   Repository,
 } from "@/lib/ports";
+import { request as httpsRequest } from "node:https";
+import { rootCertificates } from "node:tls";
+
 import {
   ejecutarIngesta,
   TIMEOUT_POSICIONES_MS,
   type IngestConfig,
 } from "@/lib/ingest";
+import {
+  CA_INTERMEDIA_NAVEGA,
+  HOST_NAVEGA,
+} from "@/lib/adapters/navega-ca";
 
 // ---------------------------------------------------------------------------
 // Intervalos de los ciclos (modo desarrollo)
@@ -50,6 +57,15 @@ import {
 
 /** Intervalo del ciclo de posiciones: cada 60 s (Requisito 12.1). */
 export const INTERVALO_POSICIONES_MS = 60_000;
+
+/**
+ * Intervalo del ciclo de posiciones con la API Navega: cada 20 s. El CSV de
+ * datos abiertos se regenera una vez por minuto; `buses_servicios` tiene una
+ * caché de 10 s, así que sondear más a menudo sí trae posiciones nuevas. 20 s
+ * deja margen sobre esa caché sin acercarse a un posible límite de cuota (la
+ * API responde 429 con un umbral que no está documentado).
+ */
+export const INTERVALO_POSICIONES_NAVEGA_MS = 20_000;
 
 /** Intervalo del ciclo de purga: cada 60 s (Requisito 12.6). */
 export const INTERVALO_PURGA_MS = 60_000;
@@ -85,7 +101,31 @@ export interface IntervalosWorker {
  * lanza, con el mismo contrato que el adaptador `pg_cron`.
  */
 export class NodeFetchTransport implements HttpTransport {
+  /** Host → certificado intermedio (PEM) que su servidor omite en la cadena. */
+  private readonly caExtraPorHost: Readonly<Record<string, string>>;
+
+  /**
+   * @param caExtraPorHost Certificados intermedios a añadir a las raíces de
+   *   Node, por host. Por defecto, el de la API Navega, cuyo servidor no envía
+   *   la cadena completa (ver `lib/adapters/navega-ca.ts`). El `fetch` global
+   *   no admite una CA propia, así que esos hosts se piden con `node:https`;
+   *   el resto sigue yendo por `fetch`. El contrato (timeout, error en no 2xx)
+   *   es el mismo por los dos caminos.
+   */
+  constructor(
+    caExtraPorHost: Readonly<Record<string, string>> = {
+      [HOST_NAVEGA]: CA_INTERMEDIA_NAVEGA,
+    },
+  ) {
+    this.caExtraPorHost = caExtraPorHost;
+  }
+
   async get(url: string, timeoutMs: number = TIMEOUT_POSICIONES_MS): Promise<string> {
+    const caExtra = this.caExtraPorHost[hostDe(url)];
+    if (caExtra !== undefined) {
+      return getHttpsConCaExtra(url, caExtra, timeoutMs);
+    }
+
     const controlador = new AbortController();
     const temporizador = setTimeout(() => {
       controlador.abort();
@@ -101,17 +141,130 @@ export class NodeFetchTransport implements HttpTransport {
       return await respuesta.text();
     } catch (error) {
       // Normaliza el aborto por timeout a un mensaje claro; el resto de errores
-      // (red, DNS, etc.) se propagan tal cual para que el ciclo los registre.
+      // (red, DNS, etc.) se enriquecen con su causa subyacente antes de
+      // propagarse para que el ciclo los registre.
       if (error instanceof Error && error.name === "AbortError") {
         throw new Error(
           `Timeout de ${timeoutMs} ms al recuperar la fuente "${url}".`,
         );
       }
-      throw error;
+      throw enriquecerErrorFetch(url, error);
     } finally {
       clearTimeout(temporizador);
     }
   }
+}
+
+/** Host de una URL `https:`, o `""` si no lo es (no aplica CA extra). */
+function hostDe(url: string): string {
+  try {
+    const { protocol, hostname } = new URL(url);
+    return protocol === "https:" ? hostname : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * GET por `node:https` confiando, además de en las raíces de Node, en el
+ * certificado intermedio `caExtra`. La verificación TLS sigue activa: solo se
+ * completa la cadena que el servidor envía incompleta.
+ *
+ * `timeoutMs` acota la petición entera (conexión, cabeceras y cuerpo), igual
+ * que el `AbortController` del camino `fetch`.
+ */
+function getHttpsConCaExtra(
+  url: string,
+  caExtra: string,
+  timeoutMs: number,
+): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    let terminado = false;
+    const terminar = (error: Error | null, cuerpo = ""): void => {
+      if (terminado) {
+        return;
+      }
+      terminado = true;
+      clearTimeout(temporizador);
+      if (error !== null) {
+        reject(error);
+      } else {
+        resolve(cuerpo);
+      }
+    };
+
+    const peticion = httpsRequest(
+      url,
+      { method: "GET", ca: [...rootCertificates, caExtra] },
+      (respuesta) => {
+        const estado = respuesta.statusCode ?? 0;
+        if (estado < 200 || estado >= 300) {
+          respuesta.resume();
+          terminar(
+            new Error(`La fuente "${url}" respondió con estado HTTP ${estado}.`),
+          );
+          return;
+        }
+        const trozos: Buffer[] = [];
+        respuesta.on("data", (trozo: Buffer) => trozos.push(trozo));
+        respuesta.on("end", () =>
+          terminar(null, Buffer.concat(trozos).toString("utf8")),
+        );
+        respuesta.on("error", (error) => terminar(errorDeRed(url, error)));
+      },
+    );
+
+    const temporizador = setTimeout(() => {
+      terminar(
+        new Error(`Timeout de ${timeoutMs} ms al recuperar la fuente "${url}".`),
+      );
+      peticion.destroy();
+    }, timeoutMs);
+
+    peticion.on("error", (error) => terminar(errorDeRed(url, error)));
+    peticion.end();
+  });
+}
+
+/** Error de `node:https` con la URL y el código (`ECONNRESET`, TLS…) visibles. */
+function errorDeRed(url: string, error: Error): Error {
+  const codigo = (error as { code?: unknown }).code;
+  const detalle =
+    typeof codigo === "string" ? `${codigo} (${error.message})` : error.message;
+  return new Error(`Fallo al recuperar la fuente "${url}": ${detalle}`);
+}
+
+/**
+ * El `fetch` de Node (undici) reporta los fallos de red como un error genérico
+ * con `message: "fetch failed"` y anida la causa real (p. ej. `ECONNRESET`,
+ * `UND_ERR_SOCKET`, `ENOTFOUND`) en `error.cause`. Si solo se registra
+ * `error.message`, un fallo intermitente queda como "fetch failed" sin
+ * distinguir un reset de conexión reutilizada de un problema de DNS o TLS. Esta
+ * función despliega la causa en el mensaje para que el `error` persistido en
+ * `ingest_log` sea accionable, conservando la URL afectada.
+ */
+function enriquecerErrorFetch(url: string, error: unknown): Error {
+  if (!(error instanceof Error)) {
+    return new Error(`Fallo al recuperar la fuente "${url}": ${String(error)}`);
+  }
+
+  const causa = (error as { cause?: unknown }).cause;
+  if (causa === undefined || causa === null) {
+    return error;
+  }
+
+  const codigo =
+    typeof causa === "object" && causa !== null && "code" in causa
+      ? String((causa as { code?: unknown }).code)
+      : undefined;
+  const detalleCausa =
+    causa instanceof Error ? causa.message : String(causa);
+  const detalle =
+    codigo !== undefined ? `${codigo} (${detalleCausa})` : detalleCausa;
+
+  return new Error(
+    `Fallo al recuperar la fuente "${url}": ${error.message} — ${detalle}`,
+  );
 }
 
 // ---------------------------------------------------------------------------

@@ -141,7 +141,15 @@ export type MotivoDescarte =
   | "codLinea_invalido"
   | "sentido_invalido"
   | "coordenadas_invalidas"
-  | "last_update_invalido";
+  | "last_update_invalido"
+  // Motivos propios de la API Navega (`lib/navega.ts`): el registro es un bus
+  // real, pero no representa un vehículo en servicio localizable en el mapa.
+  /** Estado de localización distinto de "en línea" (cocheras, retirada…). */
+  | "fuera_de_servicio"
+  /** El vehículo no comunica: su posición está congelada. */
+  | "sin_comunicacion"
+  /** Línea que la EMT no publica (`parametros.lineasOcultas`). */
+  | "linea_oculta";
 
 /**
  * Fila descartada durante el parsing, junto con el motivo del descarte. Se
@@ -149,8 +157,11 @@ export type MotivoDescarte =
  * ingesta de las filas válidas.
  */
 export interface FilaDescartada {
-  /** La fila de origen tal como se recibió (array de campos o fila cruda). */
-  fila: FilaPosicionCruda | readonly string[];
+  /**
+   * El registro de origen tal como se recibió: array de campos o fila cruda del
+   * CSV, o el objeto JSON del bus en la API Navega.
+   */
+  fila: FilaPosicionCruda | readonly string[] | Readonly<Record<string, unknown>>;
   motivo: MotivoDescarte;
 }
 

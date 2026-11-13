@@ -181,7 +181,14 @@ servidor arranca el worker al iniciarse (`instrumentation.ts` →
 1. si la base no tiene líneas, lanza una recarga GTFS inicial (descarga ~30 MB;
    tarda unos segundos);
 2. ejecuta un ciclo de posiciones y otro de purga inmediatos;
-3. programa posiciones y purga cada 60 s y GTFS cada 24 h.
+3. programa posiciones cada 20 s (60 s con `FUENTE_DATOS=datos-abiertos`), purga
+   cada 60 s y datos estáticos cada 24 h.
+
+Los datos salen por defecto de la **API Navega** de la EMT (`lib/navega.ts`,
+mapa de la API en `docs/api-navega.md`). `FUENTE_DATOS=datos-abiertos` vuelve a
+las fuentes originales (CSV + GTFS del portal de datos abiertos + scraping) si
+Navega falla; los identificadores son los mismos, así que no hay que migrar
+nada.
 
 El worker vive en el proceso de `npm run dev`/`npm start`: tras cambiar
 `INGEST_WORKER_ENABLED` hay que reiniciar el servidor.
